@@ -19,6 +19,8 @@ This tool is a WORK IN PROGRESS and likely has many bugs.
 
 ## Proposition Categories
 
+## Safety Proposition Categories
+
 | Category | Proposition | Implementation Status |
 |----------|-------------|------------------------|
 | **Basic Safety** | EGO_SPEED | IMPLEMENTED |
@@ -64,7 +66,8 @@ This tool is a WORK IN PROGRESS and likely has many bugs.
 |  | PARKING_BEHAVIOR | WORK IN PROGRESS |
 | **Advanced Maneuvers** | OVERTAKING_SAFETY | WORK IN PROGRESS |
 |  | MERGING_BEHAVIOR | WORK IN PROGRESS |
-|  | ROUNDABOUT_BEHAVIOR | WORK I_
+|  | ROUNDABOUT_BEHAVIOR | WORK IN PROGRESS |
+|  | CONSTRUCTION_ZONE_BEHAVIOR | WORK IN PROGRESS |
 
 
 ## Installation
@@ -74,12 +77,20 @@ This tool is a WORK IN PROGRESS and likely has many bugs.
 - ROS2 (Foxy, Galactic, Humble, or Iron)
 - Python 3.8+
 
-### Dependencies
+## Installing System Requirements
+System-level dependencies are listed in the `requirements.system` file, 
+with one package name per line. Lines starting with `#` are treated as comments.
+For inline comments, everything after the first `#` on a line will be ignored 
+by the installation command.
 
-Install required Python packages:
-
+You can install all necessary `apt` packages by running the following command in your terminal:
 ```bash
-pip3 install pyyaml pandas numpy pyModelChecking
+sudo apt-get update
+grep -v '^#' requirements.system | sed 's/#.*//' | xargs sudo apt-get install -y
+
+Installing required Python packages:
+```bash
+pip3 install -r requirements.pip3
 ```
 
 ### ROS2 Setup
