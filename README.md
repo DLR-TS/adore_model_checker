@@ -16,6 +16,9 @@ This tool is a WORK IN PROGRESS and likely has many bugs.
 - **CTL Model Checking**: Uses formal verification techniques to prove safety properties
 - **Extensible Framework**: Easy to add custom safety propositions and evaluation logic
 - **Comprehensive Reporting**: Detailed analysis results with statistics and pass/fail status
+- **Auto-importing ROS messages**: All defined ROS messages are auto-imported with the `ROSMessageImporter` class 
+- **Dictionary Based Topic Subscription**: All subscribed ROS topic messages are converted to dictionaries with the `ROSMarshaller` class 
+
 
 ## Proposition Categories
 
