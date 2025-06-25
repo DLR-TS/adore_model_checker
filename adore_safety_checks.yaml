@@ -1,0 +1,190 @@
+monitoring:
+  monitoring_frequency: 10.0  # 10 Hz monitoring
+  buffer_size: 1000
+  log_level: 'INFO'
+  debug_mode: false
+
+safety_parameters:
+  max_speed: 30.0  # m/s
+  safe_distance_lateral: 1.5  # meters lateral clearance
+  safe_distance_longitudinal: 2.0  # seconds following distance
+  
+  time_to_collision_threshold: 3.0  # seconds minimum TTC
+  emergency_brake_deceleration: -8.0  # m/s² max emergency braking
+  goal_reach_distance: 5.0  # meters to consider goal reached
+  
+  max_acceleration_rate: 2.0  # m/s² comfortable acceleration
+  max_deceleration_rate: -3.0  # m/s² comfortable braking
+  max_jerk: 1.0  # m/s³ comfort limit
+  
+  speed_limit_tolerance: 2.0  # m/s over limit tolerance
+  stop_line_tolerance: 0.3  # meters from stop line
+
+vehicles:
+  - id: 0
+    proposition_groups:
+      basic_safety:
+        enabled: true
+        description: "Core safety propositions - speed, collision avoidance, goal reaching"
+      
+      dynamic_safety:
+        enabled: true
+        description: "Dynamic collision avoidance and emergency response"
+      
+      traffic_rules:
+        enabled: false
+        description: "Traffic law compliance monitoring"
+
+    propositions:
+      # BASIC SAFETY CHECKS
+      EGO_SPEED:
+        enabled: true
+        atomic_prop: 'speed_safe'
+        formula_type: 'always'
+        threshold: 13.89  # Max speed m/s (50 kph/~13.89 m/s  for german residential streets. )
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'vx'
+            transform_function: 'abs'
+            cache_duration: 0.1
+        evaluation_function: 'speed_limit_evaluator'
+
+      NEAR_GOAL:
+        enabled: true
+        atomic_prop: 'goal_reached'
+        formula_type: 'eventually'
+        threshold: 5.0
+        data_sources:
+          route:
+            topic: '/ego_vehicle/route'
+            field_path: ''  
+            cache_duration: 5.0
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''  
+            cache_duration: 0.1
+        evaluation_function: 'near_goal_evaluator'
+  
+      SAFE_DISTANCE_X:
+        enabled: false
+        atomic_prop: 'longitudinal_safe'
+        formula_type: 'always'
+        data_sources:
+          ego_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          traffic_participants:
+            topic: '/ego_vehicle/traffic_participants'
+            field_path: 'data'
+            cache_duration: 0.1
+        evaluation_function: 'longitudinal_safety_evaluator'
+
+      SAFE_DISTANCE_Y:
+        enabled: false
+        atomic_prop: 'lateral_safe'
+        formula_type: 'always'
+        data_sources:
+          ego_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          traffic_participants:
+            topic: '/ego_vehicle/traffic_participants'
+            field_path: 'data'
+            cache_duration: 0.1
+        evaluation_function: 'lateral_safety_evaluator'
+
+      # DYNAMIC SAFETY CHECKS
+      TIME_TO_COLLISION:
+        enabled: false
+        atomic_prop: 'ttc_safe'
+        formula_type: 'always'
+        threshold: 3.0  # Minimum TTC in seconds
+        data_sources:
+          ego_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          traffic_participants:
+            topic: '/ego_vehicle/traffic_participants'
+            field_path: 'data'
+            cache_duration: 0.1
+        evaluation_function: 'time_to_collision_evaluator'
+
+      EMERGENCY_BRAKING:
+        enabled: false
+        atomic_prop: 'emergency_brake_available'
+        formula_type: 'always'
+        threshold: -8.0  # Max emergency deceleration
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          brake_system:
+            topic: '/ego_vehicle/brake_status'
+            field_path: ''
+            cache_duration: 0.1
+        evaluation_function: 'emergency_brake_evaluator'
+
+      SMOOTH_ACCELERATION:
+        enabled: false
+        atomic_prop: 'acceleration_smooth'
+        formula_type: 'always'
+        threshold: 2.0  # Max comfortable acceleration
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            transform_function: 'abs'
+            cache_duration: 0.1
+        evaluation_function: 'smooth_acceleration_evaluator'
+
+      # TRAFFIC COMPLIANCE CHECKS
+      SPEED_LIMIT_COMPLIANCE:
+        enabled: false
+        atomic_prop: 'speed_legal'
+        formula_type: 'always'
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'vx'
+            transform_function: 'abs'
+            cache_duration: 0.1
+          speed_limit:
+            topic: '/ego_vehicle/speed_limit'
+            field_path: 'limit'
+            cache_duration: 1.0
+        evaluation_function: 'speed_limit_compliance_evaluator'
+
+      TRAFFIC_LIGHT_COMPLIANCE:
+        enabled: false
+        atomic_prop: 'traffic_light_compliant'
+        formula_type: 'always'
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          traffic_light:
+            topic: '/ego_vehicle/traffic_light_status'
+            field_path: ''
+            cache_duration: 0.1
+        evaluation_function: 'traffic_light_compliance_evaluator'
+
+      STOP_SIGN_COMPLIANCE:
+        enabled: false
+        atomic_prop: 'stop_sign_compliant'
+        formula_type: 'always'
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          stop_sign:
+            topic: '/ego_vehicle/stop_sign_status'
+            field_path: ''
+            cache_duration: 0.1
+        evaluation_function: 'stop_sign_compliance_evaluator'
