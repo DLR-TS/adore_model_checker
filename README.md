@@ -87,6 +87,7 @@ You can install all necessary `apt` packages by running the following command in
 ```bash
 sudo apt-get update
 grep -v '^#' requirements.system | sed 's/#.*//' | xargs sudo apt-get install -y
+```
 
 Installing required Python packages:
 ```bash
