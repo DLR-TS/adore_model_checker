@@ -410,3 +410,156 @@ elif transform_function == "custom_transform":
 - Set appropriate `cache_duration` for different data sources
 - Limit `buffer_size` for memory-constrained systems
 - Use field_path extraction to reduce data processing overhead
+
+
+## Example Output
+The following section shows exaple terminal and report output from the model 
+checker.
+
+
+Running the following command while running the `simulation_scenario.py` scenario
+yields the following console output:
+Command:
+```bash
+python3 ModelChecker.py --mode online --config adore_safety_checks.yaml --vehicle-id 0 --duration 5 --output adore_safety_checks.json
+```
+Console Output:
+```text
+Starting online monitoring for vehicle 0 for 5.0 seconds...
+ROS command: ros2 topic echo /ego_vehicle/vehicle_state/dynamic
+Subscription thread started for topic: /ego_vehicle/vehicle_state/dynamic
+Started process for /ego_vehicle/vehicle_state/dynamic (PID: 1464101)
+ROS command: ros2 topic echo /ego_vehicle/route
+Subscription thread started for topic: /ego_vehicle/route
+Started process for /ego_vehicle/route (PID: 1464142)
+============================================================
+DYNAMIC VEHICLE MONITORING RESULTS
+============================================================
+
+SUMMARY:
+  Total Propositions: 2
+  Analyzed: 2
+  Passed: 2
+  Failed: 0
+  Success Rate: 100.0%
+  Overall Result: PASS
+
+DETAILED RESULTS:
+------------------------------------------------------------
+  EGO_SPEED                      : PASS     (49 states, 49 Kripke states)
+                                     Max velocity: 0.00 m/s, Avg velocity: 0.00 m/s
+                                     Speed threshold: 13.89 m/s
+                                     States with data: 44, without data: 5
+                                     Valid evaluations: 49, failed evaluations: 0
+  NEAR_GOAL                      : PASS     (49 states, 38 Kripke states)
+                                     Goal position: (606447.62, 5797244.84)
+                                     Final vehicle position: (606446.25, 5797247.34)
+                                     Min distance to goal: 2.85m
+                                     Final distance to goal: 2.85m
+                                     Distance threshold: 5.00m
+                                     States with data: 0, without data: 11
+
+Results saved to: adore_safety_checks.json
+```
+Generated json Report:
+```json
+{
+  "EGO_SPEED": {
+    "result": true,
+    "status": "PASS",
+    "states_analyzed": 49,
+    "kripke_states": 49,
+    "statistics": {
+      "max_velocity": 0.002271388617618119,
+      "average_velocity": 0.002271388617618121,
+      "speed_threshold": 13.89,
+      "states_with_data": 44,
+      "states_without_data": 5,
+      "valid_evaluations": 49,
+      "failed_evaluations": 0,
+      "true_evaluations": 49,
+      "false_evaluations": 0,
+      "speed_values": [
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119,
+        0.002271388617618119
+      ],
+      "speed_sum": 0.09994109917519733
+    }
+  },
+  "NEAR_GOAL": {
+    "result": true,
+    "status": "PASS",
+    "states_analyzed": 49,
+    "kripke_states": 38,
+    "statistics": {
+      "goal_position": {
+        "x": 606447.62,
+        "y": 5797244.84
+      },
+      "final_vehicle_position": {
+        "x": 606446.2517311152,
+        "y": 5797247.336126228
+      },
+      "min_distance_to_goal": 2.8465427956342575,
+      "final_distance_to_goal": 2.8465427956342575,
+      "goal_threshold": 5.0,
+      "states_with_data": 0,
+      "states_without_data": 11,
+      "valid_evaluations": 38,
+      "failed_evaluations": 0,
+      "true_evaluations": 38,
+      "false_evaluations": 0
+    }
+  },
+  "SUMMARY": {
+    "total_propositions": 2,
+    "analyzed": 2,
+    "passed": 2,
+    "failed": 0,
+    "success_rate": 1.0,
+    "overall_result": "PASS"
+  }
+}
+```

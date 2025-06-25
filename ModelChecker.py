@@ -19,6 +19,7 @@ import threading
 import queue
 
 from util.ROSMarshaller import ROSMarshaller
+from util.bag_file_reader import BagFileReader
 from pyModelChecking import *
 from pyModelChecking.CTLS import *
 
