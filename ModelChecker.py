@@ -685,6 +685,7 @@ class PropositionEvaluators:
         else:
             return (speed * 3.6) / safety_params.highway_safe_distance_factor
 
+
 class ModelChecker:
     def __init__(self, config: MonitoringConfig):
         self.config = config
