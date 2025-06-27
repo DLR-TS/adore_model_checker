@@ -48,7 +48,8 @@ class PropositionType(Enum):
     EGO_SPEED = ('EGO_SPEED', PropositionGroup.BASIC_SAFETY)
     SAFE_DISTANCE_X = ('SAFE_DISTANCE_X', PropositionGroup.BASIC_SAFETY)
     SAFE_DISTANCE_Y = ('SAFE_DISTANCE_Y', PropositionGroup.BASIC_SAFETY)
-    DECELERATION = ('DECELERATION', PropositionGroup.BASIC_SAFETY)
+    EGO_DECELERATION_COMPLIANCE = ('EGO_DECELERATION_COMPLIANCE', PropositionGroup.BASIC_SAFETY)
+    EGO_ACCELERATION_COMPLIANCE = ('EGO_ACCELERATION_COMPLIANCE', PropositionGroup.BASIC_SAFETY)
     
     LANE_KEEPING = ('LANE_KEEPING', PropositionGroup.LANE_COMPLIANCE)
     LANE_CHANGE_SAFE = ('LANE_CHANGE_SAFE', PropositionGroup.LANE_COMPLIANCE)
@@ -685,6 +686,47 @@ class PropositionEvaluators:
         else:
             return (speed * 3.6) / safety_params.highway_safe_distance_factor
 
+    @staticmethod
+    def deceleration_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+                                      safety_params: SafetyParameters) -> Optional[bool]:
+        try:
+            dec_source = list(config.data_sources.keys())[0]
+            dec_data = data.get(dec_source)
+
+            if dec_data is None:
+                logging.debug(f"Acceleration evaluator: No data for source '{dec_source}' in data keys: {list(data.keys())}")
+                return True
+            
+            deceleration = float(dec_data)
+            result = deceleration <= config.threashold
+            logging.debug(f"Acceleration evaluator: deceleration={deceleration:.4f}, threshold={config.threashold:.4f}, result={result}")
+            
+            return result
+
+        except Exception as e:
+            logging.error(f"Error in deceleration_evaluator: {e}")
+            return True
+
+    @staticmethod
+    def acceleration_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+                                      safety_params: SafetyParameters) -> Optional[bool]:
+        try:
+            acc_source = list(config.data_sources.keys())[0]
+            acc_data = data.get(acc_source)
+
+            if acc_data is None:
+                logging.debug(f"Acceleration evaluator: No data for source '{acc_source}' in data keys: {list(data.keys())}")
+                return True
+            
+            acceleration = float(acc_data)
+            result = acceleration >= config.threashold
+            logging.debug(f"Acceleration evaluator: acceleration={acceleration:.4f}, threshold={config.threashold:.4f}, result={result}")
+            
+            return result
+
+        except Exception as e:
+            logging.error(f"Error in acceleration_evaluator: {e}")
+            return True
 
 class ModelChecker:
     def __init__(self, config: MonitoringConfig):
@@ -728,6 +770,41 @@ class ModelChecker:
                             
         except Exception as e:
             logging.debug(f"Error collecting goal statistics: {e}")
+
+    def _collect_acceleration_statistics(self, state: VehicleState, prop_config: PropositionConfig, statistics: Dict[str, Any]):
+        """Collect goal statistics for EGO_ACCELERATION_COMPLIANCE proposition"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            acceleration_data = aggregated_data.get('ax')
+            vehicle_data = aggregated_data.get('vehicle_state')
+            
+            #if acceleration_data and vehicle_data:
+                #if acceleration_data is not None:
+                    #if statistics['min_acceleration'] is None:
+                    #    statistics['min_acceleration'] = {'ax': acceleration_data }
+
+            statistics['min_acceleration'] = [x for x in vehicle_data if x is not None].min()
+ 
+
+        except Exception as e:
+            logging.debug(f"Error collecting acceleration statistics: {e}")
+
+    def _collect_deceleration_statistics(self, state: VehicleState, prop_config: PropositionConfig, statistics: Dict[str, Any]):
+        """Collect goal statistics for EGO_ACCELERATION_COMPLIANCE proposition"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            acceleration_data = aggregated_data.get('ax')
+            vehicle_data = aggregated_data.get('vehicle_state')
+            
+            #if acceleration_data and vehicle_data:
+                #if acceleration_data is not None:
+                    #if statistics['min_acceleration'] is None:
+                    #    statistics['min_acceleration'] = {'ax': acceleration_data }
+
+            statistics['min_acceleration'] = [x for x in vehicle_data if x is not None].min()
+
+        except Exception as e:
+            logging.debug(f"Error collecting acceleration statistics: {e}")
 
     def _evaluate_proposition(self, state: VehicleState, 
                               prop_config: PropositionConfig,
@@ -781,6 +858,16 @@ class ModelChecker:
             
             elif prop_type == PropositionType.SAFE_DISTANCE_X:
                 return PropositionEvaluators.longitudinal_safety_evaluator(
+                    state.data, prop_config, self.config.safety_params
+                )
+
+            elif prop_type == PropositionType.EGO_ACCELERATION_COMPLIANCE:
+                return PropositionEvaluators.acceleration_evaluator(
+                    state.data, prop_config, self.config.safety_params
+                )
+
+            elif prop_type == PropositionType.EGO_DECELERATION_COMPLIANCE:
+                return PropositionEvaluators.deceleration_evaluator(
                     state.data, prop_config, self.config.safety_params
                 )
             
@@ -1122,7 +1209,33 @@ class ModelChecker:
                 'true_evaluations': 0,
                 'false_evaluations': 0
             }
-    
+        elif prop_type == PropositionType.EGO_ACCELERATION_COMPLIANCE:
+            statistics = {
+                'min_acceleration' : 0,
+                'max_acceleration' : 666,
+                'goal_threshold': prop_config.threshold or self.config.safety_params.goal_reach_distance,
+                'states_with_data': 0,
+                'states_without_data': len(limited_states) - len(valid_states),
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0,
+                'acceleration_values': []
+            }
+        elif prop_type == PropositionType.EGO_DECELERATION_COMPLIANCE:
+            statistics = {
+                'min_acceleration' : 0,
+                'max_acceleration' : 666,
+                'goal_threshold': prop_config.threshold or self.config.safety_params.goal_reach_distance,
+                'states_with_data': 0,
+                'states_without_data': len(limited_states) - len(valid_states),
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0,
+                'acceleration_values': []
+            }
+
         for kripke_state_id, (original_state_id, state, prop_value) in enumerate(valid_states):
             try:
                 if prop_value is None:
@@ -1133,7 +1246,10 @@ class ModelChecker:
                 elif prop_type == PropositionType.NEAR_GOAL:
                     self._collect_goal_statistics(state, prop_config, statistics, 
                                                 is_final=(kripke_state_id == len(valid_states) - 1))
-                
+                elif prop_type == PropositionType.EGO_ACCELERATION_COMPLIANCE:
+                    self._collect_acceleration_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.EGO_DECELERATION_COMPLIANCE:
+                    self._collect_deceleration_statistics(state, prop_config, statistics)
                 if prop_value is not None:
                     atom = prop_config.atomic_prop
                     L[kripke_state_id] = {atom} if prop_value else {Not(atom)}

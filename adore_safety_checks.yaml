@@ -50,6 +50,30 @@ vehicles:
             cache_duration: 0.1
         evaluation_function: 'speed_limit_evaluator'
 
+      EGO_DECELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: 'deceleration'
+        formula_type: 'always'
+        threshold: 0  # TBD
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            cache_duration: 0.1
+        evaluation_function: 'deceleration_evaluator'
+
+      EGO_ACCELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: 'acceleration'
+        formula_type: 'always'
+        threshold: 0  # TBD
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            cache_duration: 0.1
+        evaluation_function: 'acceleration_evaluator'
+
       NEAR_GOAL:
         enabled: true
         atomic_prop: 'goal_reached'
