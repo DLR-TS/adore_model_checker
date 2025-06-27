@@ -41,7 +41,7 @@ vehicles:
         enabled: true
         atomic_prop: 'speed_safe'
         formula_type: 'always'
-        threshold: 13.89  # Max speed m/s (50 kph/~13.89 m/s  for german residential streets. )
+        threshold: 13.89  # Max speed m/s (50 kph for German residential streets)
         data_sources:
           vehicle_state:
             topic: '/ego_vehicle/vehicle_state/dynamic'
@@ -65,6 +65,55 @@ vehicles:
             field_path: ''  
             cache_duration: 0.1
         evaluation_function: 'near_goal_evaluator'
+
+      DECELERATION:
+        enabled: true
+        atomic_prop: 'deceleration_safe'
+        formula_type: 'always'
+        threshold: -6.0  # Maximum safe deceleration in m/s² (negative value)
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            cache_duration: 0.1
+          brake_status:
+            topic: '/ego_vehicle/brake_status'
+            field_path: 'active'
+            cache_duration: 0.1
+        evaluation_function: 'deceleration_evaluator'
+
+      # CONTROL COMPLIANCE CHECKS
+      ACCELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: 'acceleration_compliant'
+        formula_type: 'always'
+        threshold: 1.5  # Maximum allowed error in m/s² for acceleration
+        data_sources:
+          measured_acceleration:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            cache_duration: 0.1
+          commanded_acceleration:
+            topic: '/ego_vehicle/next_vehicle_command'
+            field_path: 'acceleration'
+            cache_duration: 0.1
+        evaluation_function: 'acceleration_compliance_evaluator'
+
+      DECELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: 'deceleration_compliant'
+        formula_type: 'always'
+        threshold: 2.0  # Maximum allowed error in m/s² for deceleration
+        data_sources:
+          measured_acceleration:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'ax'
+            cache_duration: 0.1
+          commanded_acceleration:
+            topic: '/ego_vehicle/next_vehicle_command'
+            field_path: 'acceleration'
+            cache_duration: 0.1
+        evaluation_function: 'deceleration_compliance_evaluator'
   
       SAFE_DISTANCE_X:
         enabled: false
@@ -96,7 +145,7 @@ vehicles:
             cache_duration: 0.1
         evaluation_function: 'lateral_safety_evaluator'
 
-      # DYNAMIC SAFETY CHECKS
+      # DYNAMIC SAFETY CHECKS (DISABLED FOR NOW)
       TIME_TO_COLLISION:
         enabled: false
         atomic_prop: 'ttc_safe'
@@ -142,7 +191,7 @@ vehicles:
             cache_duration: 0.1
         evaluation_function: 'smooth_acceleration_evaluator'
 
-      # TRAFFIC COMPLIANCE CHECKS
+      # TRAFFIC COMPLIANCE CHECKS (ALL DISABLED)
       SPEED_LIMIT_COMPLIANCE:
         enabled: false
         atomic_prop: 'speed_legal'

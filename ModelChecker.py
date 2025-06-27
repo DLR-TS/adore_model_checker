@@ -18,10 +18,13 @@ from collections import defaultdict, deque
 import threading
 import queue
 
-from util.ROSMarshaller import ROSMarshaller
+from util.ros_marshaller import ROSMarshaller
 from util.bag_file_reader import BagFileReader
 from pyModelChecking import *
 from pyModelChecking.CTLS import *
+
+from util.ros_message_importer import ROSMessageImporter
+ROSMessageImporter.import_all_messages()
 
 class MonitoringMode(Enum):
     OFFLINE = "offline"
@@ -64,6 +67,8 @@ class PropositionType(Enum):
     PEDESTRIAN_SAFETY = ('PEDESTRIAN_SAFETY', PropositionGroup.DYNAMIC_SAFETY)
     CYCLIST_SAFETY = ('CYCLIST_SAFETY', PropositionGroup.DYNAMIC_SAFETY)
     BLIND_SPOT_MONITORING = ('BLIND_SPOT_MONITORING', PropositionGroup.DYNAMIC_SAFETY)
+    ACCELERATION_COMPLIANCE = ('ACCELERATION_COMPLIANCE', PropositionGroup.DYNAMIC_SAFETY)
+    DECELERATION_COMPLIANCE = ('DECELERATION_COMPLIANCE', PropositionGroup.DYNAMIC_SAFETY)
     
     SMOOTH_ACCELERATION = ('SMOOTH_ACCELERATION', PropositionGroup.BEHAVIORAL_SMOOTHNESS)
     SMOOTH_STEERING = ('SMOOTH_STEERING', PropositionGroup.BEHAVIORAL_SMOOTHNESS)
@@ -676,6 +681,89 @@ class PropositionEvaluators:
             return None
 
     @staticmethod
+    def deceleration_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+                              safety_params: SafetyParameters) -> Optional[bool]:
+        try:
+            vehicle_data = data.get('vehicle_state')
+            brake_data = data.get('brake_status')
+            
+            if vehicle_data is None:
+                return None
+            
+            acceleration = float(vehicle_data)
+            brake_active = brake_data if brake_data is not None else False
+            
+            max_safe_deceleration = config.threshold or safety_params.emergency_brake_deceleration
+            
+            # Check if deceleration is within safe limits
+            if acceleration < 0:  # Decelerating
+                is_safe_deceleration = acceleration >= max_safe_deceleration
+            else:
+                is_safe_deceleration = True  # Not decelerating
+            
+            # Additional check: if brakes are active, expect deceleration
+            if brake_active and acceleration > -0.5:  # Expecting some deceleration when braking
+                return False
+            
+            return is_safe_deceleration
+            
+        except Exception as e:
+            logging.error(f"Error in deceleration_evaluator: {e}")
+            return None
+
+    @staticmethod
+    def acceleration_compliance_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+                                        safety_params: SafetyParameters) -> Optional[bool]:
+        try:
+            measured_data = data.get('measured_acceleration')
+            commanded_data = data.get('commanded_acceleration')
+            
+            if measured_data is None or commanded_data is None:
+                return None
+            
+            measured_accel = float(measured_data)
+            commanded_accel = float(commanded_data)
+            
+            # Only evaluate when actively accelerating (positive commanded acceleration)
+            if commanded_accel <= 0.1:  # Not accelerating
+                return True
+            
+            difference = abs(measured_accel - commanded_accel)
+            threshold = config.threshold or 1.5  # Default 1.5 m/s² for acceleration
+            
+            return difference <= threshold
+            
+        except Exception as e:
+            logging.error(f"Error in acceleration_compliance_evaluator: {e}")
+            return None
+
+    @staticmethod
+    def deceleration_compliance_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+                                        safety_params: SafetyParameters) -> Optional[bool]:
+        try:
+            measured_data = data.get('measured_acceleration')
+            commanded_data = data.get('commanded_acceleration')
+            
+            if measured_data is None or commanded_data is None:
+                return None
+            
+            measured_accel = float(measured_data)
+            commanded_accel = float(commanded_data)
+            
+            # Only evaluate when actively decelerating (negative commanded acceleration)
+            if commanded_accel >= -0.1:  # Not decelerating
+                return True
+            
+            difference = abs(measured_accel - commanded_accel)
+            threshold = config.threshold or 2.0  # Default 2.0 m/s² for deceleration
+            
+            return difference <= threshold
+            
+        except Exception as e:
+            logging.error(f"Error in deceleration_compliance_evaluator: {e}")
+            return None
+
+    @staticmethod
     def _calculate_safe_distance(speed: float, safety_params: SafetyParameters) -> float:
         if speed <= safety_params.urban_speed_threshold:
             return (speed * 3.6) / safety_params.urban_safe_distance_factor
@@ -689,9 +777,10 @@ class ModelChecker:
             'near_goal_evaluator': PropositionEvaluators.near_goal_evaluator,
             'speed_limit_evaluator': PropositionEvaluators.speed_limit_evaluator,
             'longitudinal_safety_evaluator': PropositionEvaluators.longitudinal_safety_evaluator,
+            'deceleration_evaluator': PropositionEvaluators.deceleration_evaluator,
+            'acceleration_compliance_evaluator': PropositionEvaluators.acceleration_compliance_evaluator,
+            'deceleration_compliance_evaluator': PropositionEvaluators.deceleration_compliance_evaluator,
         }
-
-
 
     def _collect_goal_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
                                 statistics: Dict[str, Any], is_final: bool = False):
@@ -724,6 +813,177 @@ class ModelChecker:
                             
         except Exception as e:
             logging.debug(f"Error collecting goal statistics: {e}")
+
+    def _collect_speed_statistics(self, state: VehicleState, prop_config: PropositionConfig, statistics: Dict[str, Any]):
+        """Collect speed statistics for EGO_SPEED proposition"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            speed_source = list(prop_config.data_sources.keys())[0]
+            speed_data = aggregated_data.get(speed_source)
+            
+            if speed_data is not None:
+                speed = abs(float(speed_data))
+                statistics['max_velocity'] = max(statistics.get('max_velocity', 0), speed)
+                statistics['states_with_data'] += 1
+                statistics['speed_values'].append(speed)
+                
+                if 'speed_sum' not in statistics:
+                    statistics['speed_sum'] = 0
+                statistics['speed_sum'] += speed
+            else:
+                statistics['states_without_data'] += 1
+                
+        except Exception as e:
+            logging.debug(f"Error collecting speed statistics: {e}")
+            statistics['states_without_data'] += 1
+
+    def _collect_deceleration_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                       statistics: Dict[str, Any]):
+        """Collect deceleration statistics for DECELERATION proposition"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            accel_data = aggregated_data.get('vehicle_state')
+            brake_data = aggregated_data.get('brake_status')
+            
+            if accel_data is not None:
+                acceleration = float(accel_data)
+                
+                # Track overall acceleration statistics
+                statistics['max_acceleration'] = max(statistics.get('max_acceleration', float('-inf')), acceleration)
+                statistics['min_acceleration'] = min(statistics.get('min_acceleration', float('inf')), acceleration)
+                
+                # Separate positive (acceleration) and negative (deceleration) values
+                if acceleration >= 0:
+                    statistics['max_positive_acceleration'] = max(
+                        statistics.get('max_positive_acceleration', 0), acceleration
+                    )
+                    statistics['acceleration_events'] = statistics.get('acceleration_events', 0) + 1
+                else:
+                    statistics['max_deceleration'] = min(
+                        statistics.get('max_deceleration', 0), acceleration
+                    )
+                    statistics['deceleration_events'] = statistics.get('deceleration_events', 0) + 1
+                
+                # Track emergency braking events
+                emergency_threshold = statistics.get('emergency_threshold', -6.0)
+                if acceleration < emergency_threshold:
+                    statistics['emergency_brake_events'] = statistics.get('emergency_brake_events', 0) + 1
+                
+                # Track brake consistency
+                if brake_data:
+                    if brake_data and acceleration > -0.5:
+                        statistics['brake_inconsistency_events'] = statistics.get('brake_inconsistency_events', 0) + 1
+                
+                statistics['acceleration_values'].append(acceleration)
+                statistics['states_with_data'] += 1
+                
+                if 'accel_sum' not in statistics:
+                    statistics['accel_sum'] = 0
+                statistics['accel_sum'] += acceleration
+                
+        except Exception as e:
+            logging.debug(f"Error collecting deceleration statistics: {e}")
+            statistics['states_without_data'] += 1
+
+    def _collect_acceleration_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                                  statistics: Dict[str, Any]):
+        """Collect acceleration compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            measured_data = aggregated_data.get('measured_acceleration')
+            commanded_data = aggregated_data.get('commanded_acceleration')
+            
+            if measured_data is not None and commanded_data is not None:
+                measured_val = float(measured_data)
+                commanded_val = float(commanded_data)
+                
+                # Only collect statistics when actively accelerating
+                if commanded_val > 0.1:
+                    difference = abs(measured_val - commanded_val)
+                    
+                    statistics['max_acceleration_error'] = max(statistics.get('max_acceleration_error', 0), difference)
+                    statistics['min_acceleration_error'] = min(statistics.get('min_acceleration_error', float('inf')), difference)
+                    
+                    statistics['max_measured_acceleration'] = max(statistics.get('max_measured_acceleration', 0), measured_val)
+                    statistics['max_commanded_acceleration'] = max(statistics.get('max_commanded_acceleration', 0), commanded_val)
+                    
+                    statistics['acceleration_errors'].append(difference)
+                    statistics['measured_accelerations'].append(measured_val)
+                    statistics['commanded_accelerations'].append(commanded_val)
+                    
+                    statistics['acceleration_events'] += 1
+                    
+                    if 'accel_error_sum' not in statistics:
+                        statistics['accel_error_sum'] = 0
+                        statistics['measured_accel_sum'] = 0
+                        statistics['commanded_accel_sum'] = 0
+                    
+                    statistics['accel_error_sum'] += difference
+                    statistics['measured_accel_sum'] += measured_val
+                    statistics['commanded_accel_sum'] += commanded_val
+                    
+                    # Track compliance violations
+                    threshold = prop_config.threshold or 1.5
+                    if difference > threshold:
+                        statistics['compliance_violations'] += 1
+                    
+                statistics['states_with_data'] += 1
+            else:
+                statistics['states_without_data'] += 1
+                
+        except Exception as e:
+            logging.debug(f"Error collecting acceleration compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
+    def _collect_deceleration_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                                  statistics: Dict[str, Any]):
+        """Collect deceleration compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            measured_data = aggregated_data.get('measured_acceleration')
+            commanded_data = aggregated_data.get('commanded_acceleration')
+            
+            if measured_data is not None and commanded_data is not None:
+                measured_val = float(measured_data)
+                commanded_val = float(commanded_data)
+                
+                # Only collect statistics when actively decelerating
+                if commanded_val < -0.1:
+                    difference = abs(measured_val - commanded_val)
+                    
+                    statistics['max_deceleration_error'] = max(statistics.get('max_deceleration_error', 0), difference)
+                    statistics['min_deceleration_error'] = min(statistics.get('min_deceleration_error', float('inf')), difference)
+                    
+                    statistics['max_measured_deceleration'] = min(statistics.get('max_measured_deceleration', 0), measured_val)
+                    statistics['max_commanded_deceleration'] = min(statistics.get('max_commanded_deceleration', 0), commanded_val)
+                    
+                    statistics['deceleration_errors'].append(difference)
+                    statistics['measured_decelerations'].append(measured_val)
+                    statistics['commanded_decelerations'].append(commanded_val)
+                    
+                    statistics['deceleration_events'] += 1
+                    
+                    if 'decel_error_sum' not in statistics:
+                        statistics['decel_error_sum'] = 0
+                        statistics['measured_decel_sum'] = 0
+                        statistics['commanded_decel_sum'] = 0
+                    
+                    statistics['decel_error_sum'] += difference
+                    statistics['measured_decel_sum'] += measured_val
+                    statistics['commanded_decel_sum'] += commanded_val
+                    
+                    # Track compliance violations
+                    threshold = prop_config.threshold or 2.0
+                    if difference > threshold:
+                        statistics['compliance_violations'] += 1
+                    
+                statistics['states_with_data'] += 1
+            else:
+                statistics['states_without_data'] += 1
+                
+        except Exception as e:
+            logging.debug(f"Error collecting deceleration compliance statistics: {e}")
+            statistics['states_without_data'] += 1
 
     def _evaluate_proposition(self, state: VehicleState, 
                               prop_config: PropositionConfig,
@@ -767,24 +1027,36 @@ class ModelChecker:
         try:
             if prop_type == PropositionType.NEAR_GOAL:
                 return PropositionEvaluators.near_goal_evaluator(
-                    state.data, prop_config, self.config.safety_params
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
                 )
             
             elif prop_type == PropositionType.EGO_SPEED:
                 return PropositionEvaluators.speed_limit_evaluator(
-                    state.data, prop_config, self.config.safety_params
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
                 )
             
             elif prop_type == PropositionType.SAFE_DISTANCE_X:
                 return PropositionEvaluators.longitudinal_safety_evaluator(
-                    state.data, prop_config, self.config.safety_params
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
                 )
             
             elif prop_type == PropositionType.SAFE_DISTANCE_Y:
                 return self._check_lateral_safety(state, prop_config)
             
             elif prop_type == PropositionType.DECELERATION:
-                return self._check_deceleration_consistency(state, prop_config)
+                return PropositionEvaluators.deceleration_evaluator(
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
+                )
+
+            elif prop_type == PropositionType.ACCELERATION_COMPLIANCE:
+                return PropositionEvaluators.acceleration_compliance_evaluator(
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
+                )
+
+            elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
+                return PropositionEvaluators.deceleration_compliance_evaluator(
+                    self._aggregate_data_sources(state, prop_config), prop_config, self.config.safety_params
+                )
             
             elif prop_type == PropositionType.TIME_TO_COLLISION:
                 return self._check_time_to_collision(state, prop_config)
@@ -1065,12 +1337,13 @@ class ModelChecker:
                                   prop_type: PropositionType) -> Tuple[Optional[Kripke], Dict[str, Any]]:
         if not states:
             return None, {}
-    
+
         max_states = min(len(states), 1000)
         limited_states = states[:max_states]
-    
+
         valid_states = []
-        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL]:
+        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
+                        PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE]:
             for i, state in enumerate(limited_states):
                 prop_value = self._evaluate_proposition(state, prop_config, prop_type)
                 if prop_value is not None:
@@ -1082,13 +1355,13 @@ class ModelChecker:
                 return None, {}
         else:
             valid_states = [(i, state, None) for i, state in enumerate(limited_states)]
-    
+
         R = [(i, i+1) for i in range(len(valid_states)-1)]
         if valid_states:
             R.append((len(valid_states)-1, len(valid_states)-1))
         
         L = {}
-    
+
         statistics = {}
         
         if prop_type == PropositionType.EGO_SPEED:
@@ -1118,7 +1391,71 @@ class ModelChecker:
                 'true_evaluations': 0,
                 'false_evaluations': 0
             }
-    
+        elif prop_type == PropositionType.DECELERATION:
+            statistics = {
+                'max_acceleration': float('-inf'),
+                'min_acceleration': float('inf'),
+                'max_positive_acceleration': 0.0,
+                'max_deceleration': 0.0,
+                'average_acceleration': 0.0,
+                'emergency_threshold': prop_config.threshold or self.config.safety_params.emergency_brake_deceleration,
+                'acceleration_events': 0,
+                'deceleration_events': 0,
+                'emergency_brake_events': 0,
+                'brake_inconsistency_events': 0,
+                'states_with_data': 0,
+                'states_without_data': 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0,
+                'acceleration_values': []
+            }
+        elif prop_type == PropositionType.ACCELERATION_COMPLIANCE:
+            statistics = {
+                'max_acceleration_error': 0.0,
+                'min_acceleration_error': float('inf'),
+                'max_measured_acceleration': 0.0,
+                'max_commanded_acceleration': 0.0,
+                'average_acceleration_error': 0.0,
+                'average_measured_acceleration': 0.0,
+                'average_commanded_acceleration': 0.0,
+                'acceleration_threshold': prop_config.threshold or 1.5,
+                'acceleration_events': 0,
+                'compliance_violations': 0,
+                'states_with_data': 0,
+                'states_without_data': 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0,
+                'acceleration_errors': [],
+                'measured_accelerations': [],
+                'commanded_accelerations': []
+            }
+        elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
+            statistics = {
+                'max_deceleration_error': 0.0,
+                'min_deceleration_error': float('inf'),
+                'max_measured_deceleration': 0.0,
+                'max_commanded_deceleration': 0.0,
+                'average_deceleration_error': 0.0,
+                'average_measured_deceleration': 0.0,
+                'average_commanded_deceleration': 0.0,
+                'deceleration_threshold': prop_config.threshold or 2.0,
+                'deceleration_events': 0,
+                'compliance_violations': 0,
+                'states_with_data': 0,
+                'states_without_data': 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0,
+                'deceleration_errors': [],
+                'measured_decelerations': [],
+                'commanded_decelerations': []
+            }
+
         for kripke_state_id, (original_state_id, state, prop_value) in enumerate(valid_states):
             try:
                 if prop_value is None:
@@ -1129,6 +1466,12 @@ class ModelChecker:
                 elif prop_type == PropositionType.NEAR_GOAL:
                     self._collect_goal_statistics(state, prop_config, statistics, 
                                                 is_final=(kripke_state_id == len(valid_states) - 1))
+                elif prop_type == PropositionType.DECELERATION:
+                    self._collect_deceleration_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.ACCELERATION_COMPLIANCE:
+                    self._collect_acceleration_compliance_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
+                    self._collect_deceleration_compliance_statistics(state, prop_config, statistics)
                 
                 if prop_value is not None:
                     atom = prop_config.atomic_prop
@@ -1145,43 +1488,36 @@ class ModelChecker:
             except Exception as e:
                 logging.warning(f"Error evaluating valid state {kripke_state_id}: {e}")
                 continue
-    
+
+        # Final statistics calculations
         if prop_type == PropositionType.EGO_SPEED:
             if statistics['states_with_data'] > 0:
                 statistics['average_velocity'] = statistics.get('speed_sum', 0) / statistics['states_with_data']
-    
+        elif prop_type == PropositionType.DECELERATION:
+            if statistics['states_with_data'] > 0:
+                statistics['average_acceleration'] = statistics.get('accel_sum', 0) / statistics['states_with_data']
+        elif prop_type == PropositionType.ACCELERATION_COMPLIANCE:
+            if statistics['acceleration_events'] > 0:
+                statistics['average_acceleration_error'] = statistics.get('accel_error_sum', 0) / statistics['acceleration_events']
+                statistics['average_measured_acceleration'] = statistics.get('measured_accel_sum', 0) / statistics['acceleration_events']
+                statistics['average_commanded_acceleration'] = statistics.get('commanded_accel_sum', 0) / statistics['acceleration_events']
+                statistics['compliance_rate'] = (statistics['acceleration_events'] - statistics['compliance_violations']) / statistics['acceleration_events']
+        elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
+            if statistics['deceleration_events'] > 0:
+                statistics['average_deceleration_error'] = statistics.get('decel_error_sum', 0) / statistics['deceleration_events']
+                statistics['average_measured_deceleration'] = statistics.get('measured_decel_sum', 0) / statistics['deceleration_events']
+                statistics['average_commanded_deceleration'] = statistics.get('commanded_decel_sum', 0) / statistics['deceleration_events']
+                statistics['compliance_rate'] = (statistics['deceleration_events'] - statistics['compliance_violations']) / statistics['deceleration_events']
+
         if not L:
             return None, statistics
-    
+
         logging.info(f"Created Kripke structure for {prop_type.name}:")
         logging.info(f"  Original states: {len(limited_states)}, Valid states: {len(valid_states)}")
         logging.info(f"  True evaluations: {statistics.get('true_evaluations', 0)}")
         logging.info(f"  False evaluations: {statistics.get('false_evaluations', 0)}")
-    
+
         return Kripke(R=R, L=L), statistics
-   
-    def _collect_speed_statistics(self, state: VehicleState, prop_config: PropositionConfig, statistics: Dict[str, Any]):
-        """Collect speed statistics for EGO_SPEED proposition"""
-        try:
-            aggregated_data = self._aggregate_data_sources(state, prop_config)
-            speed_source = list(prop_config.data_sources.keys())[0]
-            speed_data = aggregated_data.get(speed_source)
-            
-            if speed_data is not None:
-                speed = abs(float(speed_data))
-                statistics['max_velocity'] = max(statistics.get('max_velocity', 0), speed)
-                statistics['states_with_data'] += 1
-                statistics['speed_values'].append(speed)
-                
-                if 'speed_sum' not in statistics:
-                    statistics['speed_sum'] = 0
-                statistics['speed_sum'] += speed
-            else:
-                statistics['states_without_data'] += 1
-                
-        except Exception as e:
-            logging.debug(f"Error collecting speed statistics: {e}")
-            statistics['states_without_data'] += 1
     
     def check_model(self, kripke: Kripke, formula) -> bool:
         """Check if Kripke structure satisfies the formula from initial state"""
@@ -1262,8 +1598,6 @@ class VehicleMonitorAnalyzer:
             
         finally:
             monitor.stop()
-
-
 
     def _analyze_vehicle_offline(self, bag_file: str, vehicle_config: VehicleConfig) -> Dict[str, Any]:
         """Analyze a single vehicle from bag file data"""
@@ -1561,6 +1895,57 @@ def main():
                         if threshold != 'N/A':
                             print(f"    {'':30}   Distance threshold: {threshold:.2f}m")
                         print(f"    {'':30}   States with data: {states_with_data}, without data: {states_without_data}")
+
+                    elif prop_name == 'DECELERATION' and statistics:
+                        max_accel = statistics.get('max_acceleration', 'N/A')
+                        max_decel = statistics.get('max_deceleration', 'N/A')
+                        avg_accel = statistics.get('average_acceleration', 'N/A')
+                        emergency_events = statistics.get('emergency_brake_events', 0)
+                        brake_inconsistencies = statistics.get('brake_inconsistency_events', 0)
+                        
+                        if max_accel != 'N/A':
+                            print(f"    {'':30}   Max acceleration: {max_accel:.2f} m/s², Max deceleration: {max_decel:.2f} m/s²")
+                            print(f"    {'':30}   Average acceleration: {avg_accel:.2f} m/s²")
+                            print(f"    {'':30}   Emergency brake events: {emergency_events}")
+                            print(f"    {'':30}   Brake inconsistencies: {brake_inconsistencies}")
+
+                    elif prop_name == 'ACCELERATION_COMPLIANCE' and statistics:
+                        max_error = statistics.get('max_acceleration_error', 'N/A')
+                        avg_error = statistics.get('average_acceleration_error', 'N/A')
+                        max_measured = statistics.get('max_measured_acceleration', 'N/A')
+                        max_commanded = statistics.get('max_commanded_acceleration', 'N/A')
+                        avg_measured = statistics.get('average_measured_acceleration', 'N/A')
+                        avg_commanded = statistics.get('average_commanded_acceleration', 'N/A')
+                        violations = statistics.get('compliance_violations', 0)
+                        events = statistics.get('acceleration_events', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+                        
+                        if max_error != 'N/A':
+                            print(f"    {'':30}   Max error: {max_error:.3f} m/s², Avg error: {avg_error:.3f} m/s²")
+                            print(f"    {'':30}   Max measured: {max_measured:.2f} m/s², Max commanded: {max_commanded:.2f} m/s²")
+                            print(f"    {'':30}   Avg measured: {avg_measured:.2f} m/s², Avg commanded: {avg_commanded:.2f} m/s²")
+                            print(f"    {'':30}   Acceleration events: {events}, Violations: {violations}")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+
+                    elif prop_name == 'DECELERATION_COMPLIANCE' and statistics:
+                        max_error = statistics.get('max_deceleration_error', 'N/A')
+                        avg_error = statistics.get('average_deceleration_error', 'N/A')
+                        max_measured = statistics.get('max_measured_deceleration', 'N/A')
+                        max_commanded = statistics.get('max_commanded_deceleration', 'N/A')
+                        avg_measured = statistics.get('average_measured_deceleration', 'N/A')
+                        avg_commanded = statistics.get('average_commanded_deceleration', 'N/A')
+                        violations = statistics.get('compliance_violations', 0)
+                        events = statistics.get('deceleration_events', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+                        
+                        if max_error != 'N/A':
+                            print(f"    {'':30}   Max error: {max_error:.3f} m/s², Avg error: {avg_error:.3f} m/s²")
+                            print(f"    {'':30}   Max measured: {max_measured:.2f} m/s², Max commanded: {max_commanded:.2f} m/s²")
+                            print(f"    {'':30}   Avg measured: {avg_measured:.2f} m/s², Avg commanded: {avg_commanded:.2f} m/s²")
+                            print(f"    {'':30}   Deceleration events: {events}, Violations: {violations}")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
         else:
             for vehicle_key, vehicle_results in results.items():
                 print(f"\n{vehicle_key.upper()}:")
@@ -1589,6 +1974,20 @@ def main():
                                 final_dist = statistics.get('final_distance_to_goal', 'N/A')
                                 if final_dist != 'N/A':
                                     print(f"      {'':25}   Final distance: {final_dist:.2f}m")
+
+                            elif prop_name == 'ACCELERATION_COMPLIANCE' and statistics:
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                events = statistics.get('acceleration_events', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+
+                            elif prop_name == 'DECELERATION_COMPLIANCE' and statistics:
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                events = statistics.get('deceleration_events', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
                 else:
                     print(f"  Error: {vehicle_results.get('error', 'Unknown error')}")
         
@@ -1607,15 +2006,6 @@ def main():
     finally:
         if args.mode == 'online':
             ROSMarshaller.stop()
-
-def format_position(pos_dict):
-    """Format position dictionary for display"""
-    if pos_dict and isinstance(pos_dict, dict):
-        x = pos_dict.get('x', 'N/A')
-        y = pos_dict.get('y', 'N/A')
-        if x != 'N/A' and y != 'N/A':
-            return f"({x:.2f}, {y:.2f})"
-    return "N/A"
 
 if __name__ == '__main__':
     main()
