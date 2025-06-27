@@ -28,50 +28,52 @@ This tool is a WORK IN PROGRESS and likely has many bugs.
 |----------|-------------|------------------------|
 | **Basic Safety** | EGO_SPEED | IMPLEMENTED |
 |  | NEAR_GOAL | IMPLEMENTED |
-|  | SAFE_DISTANCE_X | WORK IN PROGRESS |
-|  | SAFE_DISTANCE_Y | WORK IN PROGRESS |
-|  | DECELERATION | WORK IN PROGRESS |
-| **Lane Compliance** | LANE_KEEPING | WORK IN PROGRESS |
-|  | LANE_CHANGE_SAFE | WORK IN PROGRESS |
-|  | ROAD_BOUNDARY_RESPECT | WORK IN PROGRESS |
-|  | WRONG_WAY_DRIVING | WORK IN PROGRESS |
-| **Traffic Rules** | TRAFFIC_LIGHT_COMPLIANCE | WORK IN PROGRESS |
-|  | STOP_SIGN_COMPLIANCE | WORK IN PROGRESS |
-|  | SPEED_LIMIT_COMPLIANCE | WORK IN PROGRESS |
-|  | YIELD_COMPLIANCE | WORK IN PROGRESS |
-|  | TURN_SIGNAL_USAGE | WORK IN PROGRESS |
-| **Dynamic Safety** | TIME_TO_COLLISION | WORK IN PROGRESS |
-|  | EMERGENCY_BRAKING | WORK IN PROGRESS |
-|  | OBSTACLE_AVOIDANCE | WORK IN PROGRESS |
-|  | PEDESTRIAN_SAFETY | WORK IN PROGRESS |
-|  | CYCLIST_SAFETY | WORK IN PROGRESS |
-|  | BLIND_SPOT_MONITORING | WORK IN PROGRESS |
-| **Behavioral Smoothness** | SMOOTH_ACCELERATION | WORK IN PROGRESS |
-|  | SMOOTH_STEERING | WORK IN PROGRESS |
-|  | SMOOTH_BRAKING | WORK IN PROGRESS |
-|  | COMFORT_ZONE | WORK IN PROGRESS |
-| **Intersection Behavior** | INTERSECTION_APPROACH | WORK IN PROGRESS |
-|  | RIGHT_OF_WAY | WORK IN PROGRESS |
-|  | INTERSECTION_CLEARANCE | WORK IN PROGRESS |
-|  | TURNING_BEHAVIOR | WORK IN PROGRESS |
-| **System Health** | SENSOR_HEALTH | WORK IN PROGRESS |
-|  | LOCALIZATION_ACCURACY | WORK IN PROGRESS |
-|  | COMMUNICATION_STATUS | WORK IN PROGRESS |
-|  | SYSTEM_RESPONSE_TIME | WORK IN PROGRESS |
-|  | PATH_PLANNING_VALIDITY | WORK IN PROGRESS |
-| **Environmental Adaptation** | WEATHER_ADAPTATION | WORK IN PROGRESS |
-|  | VISIBILITY_ADAPTATION | WORK IN PROGRESS |
-|  | ROAD_CONDITION_ADAPTATION | WORK IN PROGRESS |
-|  | TRAFFIC_DENSITY_ADAPTATION | WORK IN PROGRESS |
-| **Mission Efficiency** | ROUTE_OPTIMIZATION | WORK IN PROGRESS |
-|  | FUEL_EFFICIENCY | WORK IN PROGRESS |
-|  | TIME_EFFICIENCY | WORK IN PROGRESS |
-|  | PARKING_BEHAVIOR | WORK IN PROGRESS |
-| **Advanced Maneuvers** | OVERTAKING_SAFETY | WORK IN PROGRESS |
-|  | MERGING_BEHAVIOR | WORK IN PROGRESS |
-|  | ROUNDABOUT_BEHAVIOR | WORK IN PROGRESS |
-|  | CONSTRUCTION_ZONE_BEHAVIOR | WORK IN PROGRESS |
-
+|  | SAFE_DISTANCE_X | IMPLEMENTED |
+|  | SAFE_DISTANCE_Y | IMPLEMENTED |
+|  | DECELERATION | IMPLEMENTED |
+|  | IN_COLLISION | NOT IMPLEMENTED |
+| **Lane Compliance** | LANE_KEEPING | IMPLEMENTED |
+|  | LANE_CHANGE_SAFE | NOT IMPLEMENTED |
+|  | ROAD_BOUNDARY_RESPECT | NOT IMPLEMENTED |
+|  | WRONG_WAY_DRIVING | NOT IMPLEMENTED |
+| **Traffic Rules** | TRAFFIC_LIGHT_COMPLIANCE | IMPLEMENTED |
+|  | STOP_SIGN_COMPLIANCE | NOT IMPLEMENTED |
+|  | SPEED_LIMIT_COMPLIANCE | NOT IMPLEMENTED |
+|  | YIELD_COMPLIANCE | NOT IMPLEMENTED |
+|  | TURN_SIGNAL_USAGE | NOT IMPLEMENTED |
+| **Dynamic Safety** | TIME_TO_COLLISION | IMPLEMENTED |
+|  | EMERGENCY_BRAKING | NOT IMPLEMENTED |
+|  | OBSTACLE_AVOIDANCE | NOT IMPLEMENTED |
+|  | PEDESTRIAN_SAFETY | NOT IMPLEMENTED |
+|  | CYCLIST_SAFETY | NOT IMPLEMENTED |
+|  | BLIND_SPOT_MONITORING | NOT IMPLEMENTED |
+|  | ACCELERATION_COMPLIANCE | NEWLY IMPLEMENTED |
+|  | DECELERATION_COMPLIANCE | NEWLY IMPLEMENTED |
+| **Behavioral Smoothness** | SMOOTH_ACCELERATION | IMPLEMENTED |
+|  | SMOOTH_STEERING | NOT IMPLEMENTED |
+|  | SMOOTH_BRAKING | NOT IMPLEMENTED |
+|  | COMFORT_ZONE | NOT IMPLEMENTED |
+| **Intersection Behavior** | INTERSECTION_APPROACH | NOT IMPLEMENTED |
+|  | RIGHT_OF_WAY | NOT IMPLEMENTED |
+|  | INTERSECTION_CLEARANCE | NOT IMPLEMENTED |
+|  | TURNING_BEHAVIOR | NOT IMPLEMENTED |
+| **System Health** | SENSOR_HEALTH | NOT IMPLEMENTED |
+|  | LOCALIZATION_ACCURACY | NOT IMPLEMENTED |
+|  | COMMUNICATION_STATUS | NOT IMPLEMENTED |
+|  | SYSTEM_RESPONSE_TIME | NOT IMPLEMENTED |
+|  | PATH_PLANNING_VALIDITY | NOT IMPLEMENTED |
+| **Environmental Adaptation** | WEATHER_ADAPTATION | NOT IMPLEMENTED |
+|  | VISIBILITY_ADAPTATION | NOT IMPLEMENTED |
+|  | ROAD_CONDITION_ADAPTATION | NOT IMPLEMENTED |
+|  | TRAFFIC_DENSITY_ADAPTATION | NOT IMPLEMENTED |
+| **Mission Efficiency** | ROUTE_OPTIMIZATION | NOT IMPLEMENTED |
+|  | FUEL_EFFICIENCY | NOT IMPLEMENTED |
+|  | TIME_EFFICIENCY | NOT IMPLEMENTED |
+|  | PARKING_BEHAVIOR | NOT IMPLEMENTED |
+| **Advanced Maneuvers** | OVERTAKING_SAFETY | NOT IMPLEMENTED |
+|  | MERGING_BEHAVIOR | NOT IMPLEMENTED |
+|  | ROUNDABOUT_BEHAVIOR | NOT IMPLEMENTED |
+|  | CONSTRUCTION_ZONE_BEHAVIOR | NOT IMPLEMENTED |
 
 ## Installation
 
@@ -245,13 +247,17 @@ Each proposition can specify multiple data sources:
 - **transform_function**: Optional data transformation ('abs', 'speed_from_components', etc.)
 - **cache_duration**: How long to cache data in seconds
 
-### CTL Formula Types
+## Formula Types Reference
 
-- **always**: A(G(p)) - Property must always hold
-- **eventually**: A(F(p)) - Property must eventually hold
-- **never**: A(G(Not(p))) - Property must never hold
-- **next**: A(X(p)) - Property holds in next state
-- **until**: A(U(p,q)) - Property p holds until q holds
+| Formula Type | CTL Expression | Description | Use Case |
+|--------------|----------------|-------------|----------|
+| `always` | `A(G(p))` | Property must always hold | Safety invariants |
+| `eventually` | `A(F(p))` | Property must eventually hold | Goal reaching |
+| `never` | `A(G(¬p))` | Property must never hold | Collision avoidance |
+| `always_not` | `A(G(¬p))` | Same as never | Safety violations |
+| `next` | `A(X(p))` | Property holds in next state | State transitions |
+| `until` | `A(p U q)` | p holds until q becomes true | Conditional behavior |
+| `weak_until` | `A(p W q)` | p holds until q or forever | Optional conditions |
 
 ## Usage Examples
 
@@ -567,3 +573,24 @@ Generated json Report:
   }
 }
 ```
+
+
+## Proposition Descriptions 
+
+### ACCELERATION_COMPLIANCE
+Monitors the difference between commanded and measured acceleration during acceleration events:
+- **Threshold**: Configurable maximum error (default: 1.5 m/s²)
+- **Evaluation**: Only active during positive commanded acceleration (> 0.1 m/s²)
+- **Statistics**: Max/min/avg errors, compliance rates, violation counts
+
+### DECELERATION_COMPLIANCE  
+Monitors the difference between commanded and measured acceleration during deceleration events:
+- **Threshold**: Configurable maximum error (default: 2.0 m/s²)
+- **Evaluation**: Only active during negative commanded acceleration (< -0.1 m/s²)
+- **Statistics**: Max/min/avg errors, compliance rates, violation counts
+
+Both propositions provide detailed statistics including:
+- Maximum and average tracking errors
+- Measured vs commanded acceleration values
+- Compliance violation counts and rates
+- Separate event tracking for acceleration vs deceleration
