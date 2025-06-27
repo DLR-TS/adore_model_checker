@@ -18,10 +18,13 @@ from collections import defaultdict, deque
 import threading
 import queue
 
-from util.ROSMarshaller import ROSMarshaller
+from util.ros_marshaller import ROSMarshaller
 from util.bag_file_reader import BagFileReader
 from pyModelChecking import *
 from pyModelChecking.CTLS import *
+
+from util.ros_message_importer import ROSMessageImporter
+ROSMessageImporter.import_all_messages()
 
 class MonitoringMode(Enum):
     OFFLINE = "offline"
