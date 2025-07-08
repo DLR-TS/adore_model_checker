@@ -39,6 +39,8 @@ Dependencies:
 
 import subprocess
 import os
+import sys
+
 import pty
 import threading
 import yaml
@@ -56,6 +58,9 @@ import yaml
 import json
 from yaml import CLoader as Loader
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from util.ros_message_importer import ROSMessageImporter
+ROSMessageImporter.import_all_messages()
 
 try:
     import ujson as json
