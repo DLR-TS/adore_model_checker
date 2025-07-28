@@ -5,10 +5,13 @@ using Computation Tree Logic (CTL) model checking. This tool can analyze both
 live ROS2 data streams and offline bag data files to ensure vehicles comply with 
 safety requirements.
 
+
 This tool is a WORK IN PROGRESS and likely has many bugs.
 
 ## Features
 
+- **API**: Included REST API/interface for invoking the model checker 
+    [Model Checker API Reference](adore_model_checker_api_reference.md)
 - **Dual Mode Operation**: Online monitoring of live ROS2 topics and offline analysis of bag files
 - **Configurable Safety Properties**: 50+ built-in safety propositions organized into 10 categories
 - **Multi-Vehicle Support**: Monitor multiple vehicles simultaneously with individual configurations
