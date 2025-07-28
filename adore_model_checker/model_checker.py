@@ -1394,10 +1394,16 @@ class ModelChecker:
             aggregated_data = self._aggregate_data_sources(state, prop_config)
             lane_data = aggregated_data.get('lane_info')
             vehicle_data = aggregated_data.get('vehicle_state')
-            
             if not lane_data or not vehicle_data:
                 return None
             
+            road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+            for road in road_data:
+                lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                for lanes in lanes_data:
+                    center_points = DataTransforms.get_nested_value(lanes, 'center_points')
+                    print(f"The Center Points: {center_points}")
+
             lateral_deviation = DataTransforms.get_nested_value(lane_data, 'lateral_deviation')
             if lateral_deviation is None:
                 ego_y = DataTransforms.get_nested_value(vehicle_data, 'y')
