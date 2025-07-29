@@ -1466,7 +1466,7 @@ class ModelChecker:
             lane_data = aggregated_data.get('lane_info')
             vehicle_data = aggregated_data.get('vehicle_state')
             if not lane_data or not vehicle_data:
-                return False # None?
+                return None
             
             min_distance_on_map = float('inf')
             x = DataTransforms.get_nested_value(vehicle_data, 'x')
@@ -1586,7 +1586,8 @@ class ModelChecker:
 
         valid_states = []
         if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
-                        PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE]:
+                        PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE,
+                        PropositionType.LANE_KEEPING]: #BAB: I think this must always run and the else never?
             for i, state in enumerate(limited_states):
                 prop_value = self._evaluate_proposition(state, prop_config, prop_type)
                 if prop_value is not None:
