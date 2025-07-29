@@ -17,7 +17,6 @@ import numpy as np
 from collections import defaultdict, deque
 import threading
 import queue
-from geometry_msgs.msg import Point
 
 def setup_imports():
     try:
@@ -475,7 +474,7 @@ class DataTransforms:
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
     
     @staticmethod
-    def closest_point_on_segment_2d(x: float, y: float, a: Dict[str, Any], b: Dict[str, Any]) -> Point:
+    def closest_point_on_segment_2d(x: float, y: float, a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         ab_x = b['x'] - a['x']
         ab_y = b['y'] - a['y']
 
@@ -1739,8 +1738,10 @@ class ModelChecker:
                         statistics['true_evaluations'] += 1
                     else:
                         statistics['false_evaluations'] += 1
+
                     if kripke_state_id < 5:
                         logging.info(f"  Kripke State {kripke_state_id} (orig {original_state_id}): prop_value={prop_value}, label={atom if prop_value else f'Not({atom})'}")
+
             except Exception as e:
                 logging.warning(f"Error evaluating valid state {kripke_state_id}: {e}")
                 continue
@@ -2027,6 +2028,7 @@ class VehicleMonitorAnalyzer:
             'success_rate': passed / total if total > 0 else 0.0,
             'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL'
         }
+
         return results
 
     def _get_enabled_propositions(self, vehicle_config: VehicleConfig) -> Dict[str, PropositionConfig]:
