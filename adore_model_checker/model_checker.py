@@ -17,6 +17,7 @@ import numpy as np
 from collections import defaultdict, deque
 import threading
 import queue
+from geometry_msgs.msg import Point
 
 def setup_imports():
     try:
@@ -473,6 +474,30 @@ class DataTransforms:
     def calculate_distance(x1: float, y1: float, x2: float, y2: float) -> float:
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
     
+    @staticmethod
+    def closest_point_on_segment_2d(x: float, y: float, a: Dict[str, Any], b: Dict[str, Any]) -> Point:
+        ab_x = b['x'] - a['x']
+        ab_y = b['y'] - a['y']
+
+        ap_x = x - a['x']
+        ap_y = y - a['y']
+
+        ab_len_sq = ab_x**2 + ab_y**2
+        if ab_len_sq == 0:
+            return a  # A and B are the same point
+
+        t = (ap_x * ab_x + ap_y * ab_y) / ab_len_sq
+
+        if t < 0.0:
+            return a
+        elif t > 1.0:
+            return b
+        else:
+            closest: Dict[str, Any] = {}
+            closest['x'] = a['x'] + t * ab_x
+            closest['y'] = a['y'] + t * ab_y
+            return closest
+
     @staticmethod
     def calculate_speed(vx: float, vy: float) -> float:
         return math.sqrt(vx**2 + vy**2)
@@ -1185,6 +1210,47 @@ class ModelChecker:
             logging.debug(f"Error collecting deceleration compliance statistics: {e}")
             statistics['states_without_data'] += 1
 
+    def _collect_lanekeeping_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig,
+                                                  statistics: Dict[str, Any]):
+        """Collect deceleration compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            lane_data = aggregated_data.get('lane_info')
+            vehicle_data = aggregated_data.get('vehicle_state')
+            min_distance_on_map = float('inf')
+            x = DataTransforms.get_nested_value(vehicle_data, 'x')
+            y = DataTransforms.get_nested_value(vehicle_data, 'y')
+
+            if lane_data is not None and vehicle_data is not None:
+                road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+                for road in road_data:
+                    lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                    for lanes in lanes_data:
+                        center_points = DataTransforms.get_nested_value(lanes, 'center_points')
+                        if len(center_points) < 2:
+                            raise ValueError("At least two points are required to define a line")
+                        for i in range(len(center_points) - 1):
+                            a = center_points[i]
+                            b = center_points[i + 1]
+                            closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
+                            dist = DataTransforms.calculate_distance(x, y, closest['x'], closest['y'])
+                            if dist < min_distance_on_map:
+                                min_distance_on_map = dist
+
+                statistics['max_distance'] = max(statistics.get('max_distance', 0), min_distance_on_map)
+
+                threshold = prop_config.threshold
+                if min_distance_on_map > threshold:
+                    statistics['compliance_violations'] += 1
+
+                statistics['states_with_data'] += 1
+            else:
+                statistics['states_without_data'] += 1
+
+        except Exception as e:
+            logging.debug(f"Error collecting lanekeeping compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
     def _evaluate_proposition(self, state: VehicleState, 
                               prop_config: PropositionConfig,
                               prop_type: PropositionType) -> Optional[bool]:
@@ -1397,27 +1463,26 @@ class ModelChecker:
             if not lane_data or not vehicle_data:
                 return None
             
+            min_distance_on_map = float('inf')
+            x = DataTransforms.get_nested_value(vehicle_data, 'x')
+            y = DataTransforms.get_nested_value(vehicle_data, 'y')
             road_data = DataTransforms.get_nested_value(lane_data, 'roads')
             for road in road_data:
                 lanes_data = DataTransforms.get_nested_value(road, 'lanes')
                 for lanes in lanes_data:
                     center_points = DataTransforms.get_nested_value(lanes, 'center_points')
-                    print(f"The Center Points: {center_points}")
+                    if len(center_points) < 2:
+                        raise ValueError("At least two points are required to define a line")
+                    for i in range(len(center_points) - 1):
+                        a = center_points[i]
+                        b = center_points[i + 1]
+                        closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
+                        dist = DataTransforms.calculate_distance(x, y, closest['x'], closest['y'])
+                        if dist < min_distance_on_map:
+                            min_distance_on_map = dist
 
-            lateral_deviation = DataTransforms.get_nested_value(lane_data, 'lateral_deviation')
-            if lateral_deviation is None:
-                ego_y = DataTransforms.get_nested_value(vehicle_data, 'y')
-                lane_center_y = DataTransforms.get_nested_value(lane_data, 'center_y')
-                
-                if ego_y is not None and lane_center_y is not None:
-                    lateral_deviation = abs(ego_y - lane_center_y)
-            
-            if lateral_deviation is None:
-                return None
-            
             threshold = prop_config.threshold or self.config.safety_params.lane_deviation_threshold
-            return lateral_deviation <= threshold
-            
+            return min_distance_on_map <= threshold
         except Exception as e:
             logging.error(f"Error in lane keeping check: {e}")
             return None
@@ -1628,6 +1693,17 @@ class ModelChecker:
                 'measured_decelerations': [],
                 'commanded_decelerations': []
             }
+        elif prop_type == PropositionType.LANE_KEEPING:
+            statistics = {
+                'max_distance' : float('inf'),
+                'compliance_violations': 0,
+                'states_with_data' : 0,
+                'states_without_data' : 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0
+            }
 
         for kripke_state_id, (original_state_id, state, prop_value) in enumerate(valid_states):
             try:
@@ -1645,7 +1721,9 @@ class ModelChecker:
                     self._collect_acceleration_compliance_statistics(state, prop_config, statistics)
                 elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
                     self._collect_deceleration_compliance_statistics(state, prop_config, statistics)
-                
+                elif prop_type == PropositionType.LANE_KEEPING:
+                    self._collect_lanekeeping_compliance_statistics(state, prop_config, statistics)
+
                 if prop_value is not None:
                     atom = prop_config.atomic_prop
                     L[kripke_state_id] = {atom} if prop_value else {Not(atom)}
@@ -1654,10 +1732,8 @@ class ModelChecker:
                         statistics['true_evaluations'] += 1
                     else:
                         statistics['false_evaluations'] += 1
-                    
                     if kripke_state_id < 5:
                         logging.info(f"  Kripke State {kripke_state_id} (orig {original_state_id}): prop_value={prop_value}, label={atom if prop_value else f'Not({atom})'}")
-                        
             except Exception as e:
                 logging.warning(f"Error evaluating valid state {kripke_state_id}: {e}")
                 continue
