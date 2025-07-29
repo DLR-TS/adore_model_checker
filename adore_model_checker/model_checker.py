@@ -1237,7 +1237,12 @@ class ModelChecker:
                             if dist < min_distance_on_map:
                                 min_distance_on_map = dist
 
+                #the maximum of all minimum distances to centerline of each frame
                 statistics['max_distance'] = max(statistics.get('max_distance', 0), min_distance_on_map)
+
+                if 'distance_error_sum' not in statistics:
+                    statistics['distance_error_sum'] = 0
+                statistics['distance_error_sum'] += min_distance_on_map
 
                 threshold = prop_config.threshold
                 if min_distance_on_map > threshold:
@@ -1461,7 +1466,7 @@ class ModelChecker:
             lane_data = aggregated_data.get('lane_info')
             vehicle_data = aggregated_data.get('vehicle_state')
             if not lane_data or not vehicle_data:
-                return None
+                return False # None?
             
             min_distance_on_map = float('inf')
             x = DataTransforms.get_nested_value(vehicle_data, 'x')
@@ -1695,8 +1700,9 @@ class ModelChecker:
             }
         elif prop_type == PropositionType.LANE_KEEPING:
             statistics = {
-                'max_distance' : float('inf'),
-                'compliance_violations': 0,
+                'max_distance' : 0,
+                'avg_distance' : float('inf'),
+                'compliance_violations' : 0,
                 'states_with_data' : 0,
                 'states_without_data' : 0,
                 'valid_evaluations': 0,
@@ -1756,6 +1762,9 @@ class ModelChecker:
                 statistics['average_measured_deceleration'] = statistics.get('measured_decel_sum', 0) / statistics['deceleration_events']
                 statistics['average_commanded_deceleration'] = statistics.get('commanded_decel_sum', 0) / statistics['deceleration_events']
                 statistics['compliance_rate'] = (statistics['deceleration_events'] - statistics['compliance_violations']) / statistics['deceleration_events']
+        elif prop_type ==PropositionType.LANE_KEEPING:
+            pass
+            statistics['distance_error_avg'] = statistics.get('distance_error_sum', 0) / statistics['states_with_data']
 
         if not L:
             return None, statistics
@@ -2017,7 +2026,6 @@ class VehicleMonitorAnalyzer:
             'success_rate': passed / total if total > 0 else 0.0,
             'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL'
         }
-        
         return results
 
     def _get_enabled_propositions(self, vehicle_config: VehicleConfig) -> Dict[str, PropositionConfig]:
@@ -2056,9 +2064,3 @@ class VehicleMonitorAnalyzer:
                 results[f'vehicle_{vehicle_config.id}'] = {'error': str(e)}
         
         return results
-
-def format_position(pos_dict):
-    """Format position dictionary for display"""
-    if pos_dict and isinstance(pos_dict, dict):
-        return f"({pos_dict.get('x', 'N/A'):.2f}, {pos_dict.get('y', 'N/A'):.2f})"
-    return "N/A"

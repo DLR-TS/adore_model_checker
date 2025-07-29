@@ -149,6 +149,7 @@ vehicles:
         enabled: true
         atomic_prop: 'lanekeeping'
         formula_type: 'always'
+        threshold: 0.5
         data_sources:
           vehicle_state:
             topic: '/ego_vehicle/vehicle_state/dynamic'
