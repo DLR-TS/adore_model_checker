@@ -1765,7 +1765,6 @@ class ModelChecker:
                 statistics['average_commanded_deceleration'] = statistics.get('commanded_decel_sum', 0) / statistics['deceleration_events']
                 statistics['compliance_rate'] = (statistics['deceleration_events'] - statistics['compliance_violations']) / statistics['deceleration_events']
         elif prop_type ==PropositionType.LANE_KEEPING:
-            pass
             statistics['distance_error_avg'] = statistics.get('distance_error_sum', 0) / statistics['states_with_data']
 
         if not L:
