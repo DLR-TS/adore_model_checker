@@ -191,6 +191,17 @@ def main():
                             print(f"    {'':30}   Deceleration events: {events}, Violations: {violations}")
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+                    elif prop_name == 'SMOOTH_STEERING' and statistics:
+                        max_steering_rate = statistics.get('max_steering_rate', 'N/A')
+                        min_steering_rate = statistics.get('min_steering_rate', 'N/A')
+                        violations = statistics.get('compliance_violations', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+                        
+                        if max_steering_rate != 'N/A':
+                            print(f"    {'':30}   Max steering rate: {max_steering_rate:.3f} , Min steering rate: {min_steering_rate:.3f} ")
+                            print(f"    {'':30}   Violations: {violations}")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
         else:
             for vehicle_key, vehicle_results in results.items():
                 print(f"\n{vehicle_key.upper()}:")
@@ -233,6 +244,13 @@ def main():
                                 events = statistics.get('deceleration_events', 0)
                                 if compliance_rate != 'N/A':
                                     print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+
+                            elif prop_name == 'SMOOTH_STEERING' and statistics:
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                events = statistics.get('max_steering_rate', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Violations: {violations}")
                 else:
                     print(f"  Error: {vehicle_results.get('error', 'Unknown error')}")
         
