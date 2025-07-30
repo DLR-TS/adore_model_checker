@@ -1185,6 +1185,60 @@ class ModelChecker:
             logging.debug(f"Error collecting deceleration compliance statistics: {e}")
             statistics['states_without_data'] += 1
 
+    def _collect_ttc_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                                  statistics: Dict[str, Any]):
+        """Collect ttc compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+
+            ego_data = aggregated_data.get('ego_state')
+            traffic_data = aggregated_data.get('traffic_participants')
+
+            ego_x = DataTransforms.get_nested_value(ego_data, 'x')
+            ego_y = DataTransforms.get_nested_value(ego_data, 'y')
+            ego_vx = DataTransforms.get_nested_value(ego_data, 'vx')
+            ego_vy = DataTransforms.get_nested_value(ego_data, 'vy')
+
+            threshold = prop_config.threshold or self.config.safety_params.time_to_collision_threshold
+
+            for participant in traffic_data:
+                if isinstance(participant, dict):
+
+                    participant_data = participant.get('participant_data', {})
+                    motion_state = participant_data.get('motion_state', {})
+                    other_x = motion_state.get('x')
+                    other_y = motion_state.get('y')
+                    other_vx = motion_state.get('vx')
+                    other_vy = motion_state.get('vy')
+
+                    print(f"{other_x} {other_y} {other_vx} {other_vy}")
+                    if None in [other_x, other_y, other_vx, other_vy]:
+                        continue
+
+                    ttc = self._calculate_time_to_collision(
+                        ego_x, ego_y, ego_vx, ego_vy,
+                        other_x, other_y, other_vx, other_vy
+                    )
+                    print(f"TTC: {ttc}")
+                    if ttc is not None:
+                        if statistics['min_ttc'] is None:
+                            statistics['min_ttc'] = ttc
+                        else:
+                            statistics['min_ttc'] = min(ttc, statistics['min_ttc'])
+                            statistics['sun_ttc'] += ttc;
+
+                    threshold = prop_config.threshold
+                    if ttc < threshold:
+                        statistics['compliance_violations'] += 1
+
+                statistics['states_with_data'] += 1
+            else:
+                statistics['states_without_data'] += 1
+
+        except Exception as e:
+            logging.debug(f"Error collecting deceleration compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
     def _evaluate_proposition(self, state: VehicleState, 
                               prop_config: PropositionConfig,
                               prop_type: PropositionType) -> Optional[bool]:
@@ -1510,7 +1564,8 @@ class ModelChecker:
 
         valid_states = []
         if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
-                        PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE]:
+                        PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE,
+                        PropositionType.TIME_TO_COLLISION]:
             for i, state in enumerate(limited_states):
                 prop_value = self._evaluate_proposition(state, prop_config, prop_type)
                 if prop_value is not None:
@@ -1553,6 +1608,19 @@ class ModelChecker:
                 'goal_threshold': prop_config.threshold or self.config.safety_params.goal_reach_distance,
                 'states_with_data': 0,
                 'states_without_data': len(limited_states) - len(valid_states),
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0
+            }
+        elif prop_type == PropositionType.TIME_TO_COLLISION:
+            statistics = {
+                'min_ttc': None,
+                'avg_ttc': None,
+                'sum_ttc': 0,
+                'goal_threshold': prop_config.threshold or self.config.safety_params.time_to_collision_threshold,
+                'states_with_data': 0,
+                'states_without_data': 0,
                 'valid_evaluations': 0,
                 'failed_evaluations': 0,
                 'true_evaluations': 0,
@@ -1639,6 +1707,8 @@ class ModelChecker:
                     self._collect_acceleration_compliance_statistics(state, prop_config, statistics)
                 elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
                     self._collect_deceleration_compliance_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.TIME_TO_COLLISION:
+                    self._collect_ttc_compliance_statistics(state, prop_config, statistics)
                 
                 if prop_value is not None:
                     atom = prop_config.atomic_prop
@@ -1659,6 +1729,9 @@ class ModelChecker:
         if prop_type == PropositionType.EGO_SPEED:
             if statistics['states_with_data'] > 0:
                 statistics['average_velocity'] = statistics.get('speed_sum', 0) / statistics['states_with_data']
+        if prop_type == PropositionType.TIME_TO_COLLISION:
+            if statistics['states_with_data'] > 0:
+                statistics['avg_ttc'] = statistics.get('sum_ttc', 0) / statistics['states_with_data']
         elif prop_type == PropositionType.DECELERATION:
             if statistics['states_with_data'] > 0:
                 statistics['average_acceleration'] = statistics.get('accel_sum', 0) / statistics['states_with_data']

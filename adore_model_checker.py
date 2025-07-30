@@ -191,6 +191,20 @@ def main():
                             print(f"    {'':30}   Deceleration events: {events}, Violations: {violations}")
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+
+                    elif prop_name == 'TIME_TO_COLLISION' and statistics:
+
+                        min_ttc = statistics.get('min_ttc', 'N/A')
+                        avg_ttc = statistics.get('avg_ttc', 'N/A')
+                        violations = statistics.get('compliance_violations', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+
+                        if min_ttc != 'N/A' and min_ttc != None:
+                            print(f"    {'':30}   Min TTC: {min_ttc:.3f} s, Avg TTC: {avg_ttc:.3f} m/s²")
+                            print(f"    {'':30}   Violations: {violations}")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+
         else:
             for vehicle_key, vehicle_results in results.items():
                 print(f"\n{vehicle_key.upper()}:")
@@ -233,6 +247,13 @@ def main():
                                 events = statistics.get('deceleration_events', 0)
                                 if compliance_rate != 'N/A':
                                     print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+                            elif prop_name == 'TIME_TO_COLLISION' and statistics:
+                                print("asdf3")
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Violations: {violations}")
+                                print("asdf4")
                 else:
                     print(f"  Error: {vehicle_results.get('error', 'Unknown error')}")
         
