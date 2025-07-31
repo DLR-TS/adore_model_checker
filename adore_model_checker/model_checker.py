@@ -1290,7 +1290,7 @@ class ModelChecker:
                 measured_val = float(measured_data)
 
                 if statistics['max_steering_rate'] is None:
-                    statistics['max_steering_rate'] = 0
+                    statistics['max_steering_rate'] = 0.0
                 if statistics['min_steering_rate'] is None:
                     statistics['min_steering_rate'] = float('inf')
 
