@@ -996,6 +996,24 @@ class PropositionEvaluators:
             logging.error(f"Error in deceleration_compliance_evaluator: {e}")
             return None
 
+#    @staticmethod
+#    def steering_rate_compliance_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+#                                        safety_params: SafetyParameters) -> Optional[bool]:
+#        try:
+#            measured_data = data.get('steering_rate')
+#            
+#            if measured_data is None:
+#                return None
+#            
+#            measured_steering_rate = float(measured_data)
+#            threshold = config.threshold
+#            
+#            return measured_steering_rate <= threshold
+#            
+#        except Exception as e:
+#            logging.error(f"Error in steering_rate_compliance_evaluator: {e}")
+#            return None
+
     @staticmethod
     def _calculate_safe_distance(speed: float, safety_params: SafetyParameters) -> float:
         if speed <= safety_params.urban_speed_threshold:
@@ -1013,6 +1031,7 @@ class ModelChecker:
             'deceleration_evaluator': PropositionEvaluators.deceleration_evaluator,
             'acceleration_compliance_evaluator': PropositionEvaluators.acceleration_compliance_evaluator,
             'deceleration_compliance_evaluator': PropositionEvaluators.deceleration_compliance_evaluator,
+#            'smooth_steering_evaluator': PropositionEvaluators.steering_rate_compliance_evaluator,
         }
 
     def _collect_goal_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
@@ -1209,6 +1228,33 @@ class ModelChecker:
             logging.debug(f"Error collecting deceleration compliance statistics: {e}")
             statistics['states_without_data'] += 1
 
+    def _collect_smooth_steering_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                                  statistics: Dict[str, Any]):
+        """Collect smooth steering compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            measured_data = aggregated_data.get('steering_rate')
+            
+            if measured_data is not None:
+                measured_val = float(measured_data)
+
+                if statistics['max_steering_rate'] is None:
+                    statistics['max_steering_rate'] = 0
+                if statistics['min_steering_rate'] is None:
+                    statistics['min_steering_rate'] = float('inf')
+
+                statistics['max_steering_rate'] = max(statistics['max_steering_rate'], measured_val)
+                statistics['min_steering_rate'] = min(statistics['min_steering_rate'], measured_val)
+
+                threshold = prop_config.threshold
+                if measured_val > threshold:
+                    statistics['compliance_violations'] += 1
+
+                statistics['states_with_data'] += 1
+        except Exception as e:
+            logging.debug(f"Error collecting smooth steering compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
     def _collect_lanekeeping_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig,
                                                   statistics: Dict[str, Any]):
         """Collect deceleration compliance statistics"""
@@ -1339,7 +1385,10 @@ class ModelChecker:
             
             elif prop_type == PropositionType.SMOOTH_ACCELERATION:
                 return self._check_smooth_acceleration(state, prop_config)
-            
+
+            elif prop_type == PropositionType.SMOOTH_STEERING:
+                return self._check_smooth_steering(state, prop_config)
+
             else:
                 logging.warning(f"No evaluation method for proposition type: {prop_type}")
                 return None
@@ -1550,6 +1599,21 @@ class ModelChecker:
             logging.error(f"Error in smooth acceleration check: {e}")
             return None
 
+    def _check_smooth_steering(self, state: VehicleState, prop_config: PropositionConfig) -> Optional[bool]:
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            steering_rate = aggregated_data.get('steering_rate')
+            if steering_rate is None:
+                return None
+
+            max_steering_rate = prop_config.threshold or self.config.safety_params.max_steering_rate
+            abs(steering_rate) <= max_steering_rate
+            return abs(steering_rate) <= max_steering_rate
+            
+        except Exception as e:
+            logging.error(f"Error in smooth acceleration check: {e}")
+            return None
+
     def get_formula(self, prop_config: PropositionConfig):
         atom = prop_config.atomic_prop
         
@@ -1584,7 +1648,7 @@ class ModelChecker:
         limited_states = states[:max_states]
 
         valid_states = []
-        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
+        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, PropositionType.SMOOTH_STEERING,
                         PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE,
                         PropositionType.LANE_KEEPING]: #BAB: I think this must always run and the else never?
             for i, state in enumerate(limited_states):
@@ -1629,6 +1693,17 @@ class ModelChecker:
                 'goal_threshold': prop_config.threshold or self.config.safety_params.goal_reach_distance,
                 'states_with_data': 0,
                 'states_without_data': len(limited_states) - len(valid_states),
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0
+            }
+        elif prop_type == PropositionType.SMOOTH_STEERING:
+            statistics = {
+                'max_steering_rate': None,
+                'min_steering_rate': None,
+                'states_with_data': 0,
+                'states_without_data': 0,
                 'valid_evaluations': 0,
                 'failed_evaluations': 0,
                 'true_evaluations': 0,
@@ -1727,6 +1802,8 @@ class ModelChecker:
                     self._collect_acceleration_compliance_statistics(state, prop_config, statistics)
                 elif prop_type == PropositionType.DECELERATION_COMPLIANCE:
                     self._collect_deceleration_compliance_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.SMOOTH_STEERING:
+                    self._collect_smooth_steering_compliance_statistics(state, prop_config, statistics)
                 elif prop_type == PropositionType.LANE_KEEPING:
                     self._collect_lanekeeping_compliance_statistics(state, prop_config, statistics)
 
