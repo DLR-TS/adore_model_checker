@@ -25,7 +25,11 @@ def setup_imports():
 
 ROSMarshaller, BagFileReader, ROSMessageImporter, ConfigLoader, VehicleMonitorAnalyzer = setup_imports()
 
-
+def format_position(pos_dict):
+    """Format position dictionary for display"""
+    if pos_dict and isinstance(pos_dict, dict):
+        return f"({pos_dict.get('x', 'N/A'):.2f}, {pos_dict.get('y', 'N/A'):.2f})"
+    return "N/A"
 
 def main():
     parser = argparse.ArgumentParser(description='Dynamic ROS Model Checker for Vehicle Monitoring')
@@ -192,6 +196,18 @@ def main():
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
 
+                    elif prop_name == 'SMOOTH_STEERING' and statistics:
+                        max_steering_rate = statistics.get('max_steering_rate', 'N/A')
+                        min_steering_rate = statistics.get('min_steering_rate', 'N/A')
+                        violations = statistics.get('compliance_violations', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+                        
+                        if max_steering_rate != 'N/A':
+                            print(f"    {'':30}   Max steering rate: {max_steering_rate:.3f} , Min steering rate: {min_steering_rate:.3f} ")
+                            print(f"    {'':30}   Violations: {violations}")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+
                     elif prop_name == 'TIME_TO_COLLISION' and statistics:
 
                         min_ttc = statistics.get('min_ttc', 'N/A')
@@ -204,6 +220,19 @@ def main():
                             print(f"    {'':30}   Violations: {violations}")
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
+                        else:
+                            print(f"    {'':30}   No TTC calculatable")
+
+                    elif prop_name == 'LANE_KEEPING' and statistics:
+                        max_distance = statistics.get('max_distance', float('inf'))
+                        avg_distance = statistics.get('distance_error_avg', float('inf'))
+                        violations = statistics.get('compliance_violations', 0)
+                        compliance_rate = statistics.get('compliance_rate', 'N/A')
+
+                        if max_error != 'N/A':
+                            print(f"    {'':30}   Max distance: {max_distance:.3f} m, Avg distance: {avg_distance:.3f} m")
+                            if compliance_rate != 'N/A':
+                                print(f"    {'':30}   Violations: {violations}")
 
         else:
             for vehicle_key, vehicle_results in results.items():
@@ -247,13 +276,26 @@ def main():
                                 events = statistics.get('deceleration_events', 0)
                                 if compliance_rate != 'N/A':
                                     print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+
                             elif prop_name == 'TIME_TO_COLLISION' and statistics:
-                                print("asdf3")
                                 compliance_rate = statistics.get('compliance_rate', 'N/A')
                                 violations = statistics.get('compliance_violations', 0)
                                 if compliance_rate != 'N/A':
                                     print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Violations: {violations}")
-                                print("asdf4")
+
+                            elif prop_name == 'SMOOTH_STEERING' and statistics:
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                events = statistics.get('max_steering_rate', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Violations: {violations}")
+
+                            elif prop_name == 'LANE_KEEPING' and statistics:
+                                compliance_rate = statistics.get('compliance_rate', 'N/A')
+                                violations = statistics.get('compliance_violations', 0)
+                                if compliance_rate != 'N/A':
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+
                 else:
                     print(f"  Error: {vehicle_results.get('error', 'Unknown error')}")
         
@@ -275,10 +317,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-

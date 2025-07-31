@@ -145,6 +145,22 @@ vehicles:
             cache_duration: 0.1
         evaluation_function: 'lateral_safety_evaluator'
 
+      LANE_KEEPING:
+        enabled: true
+        atomic_prop: 'lanekeeping'
+        formula_type: 'always'
+        threshold: 0.5
+        data_sources:
+          vehicle_state:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: ''
+            cache_duration: 0.1
+          lane_info:
+            topic: '/ego_vehicle/local_map'
+            field_path: ''
+            cache_duration: 1.0
+        evaluation_function: 'lanekeeping_safety_evaluator'
+
       # DYNAMIC SAFETY CHECKS (DISABLED FOR NOW)
       TIME_TO_COLLISION:
         enabled: true
@@ -190,6 +206,19 @@ vehicles:
             transform_function: 'abs'
             cache_duration: 0.1
         evaluation_function: 'smooth_acceleration_evaluator'
+
+      SMOOTH_STEERING:
+        enabled: true
+        atomic_prop: 'steering_smooth'
+        formula_type: 'always'
+        threshold: 45.0  # Max comfortable steering rate
+        data_sources:
+          steering_rate:
+            topic: '/ego_vehicle/vehicle_state/dynamic'
+            field_path: 'steering_rate'
+            transform_function: 'abs'
+            cache_duration: 0.1
+        evaluation_function: 'smooth_steering_evaluator'
 
       # TRAFFIC COMPLIANCE CHECKS (ALL DISABLED)
       SPEED_LIMIT_COMPLIANCE:

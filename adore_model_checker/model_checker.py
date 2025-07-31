@@ -474,6 +474,30 @@ class DataTransforms:
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
     
     @staticmethod
+    def closest_point_on_segment_2d(x: float, y: float, a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+        ab_x = b['x'] - a['x']
+        ab_y = b['y'] - a['y']
+
+        ap_x = x - a['x']
+        ap_y = y - a['y']
+
+        ab_len_sq = ab_x**2 + ab_y**2
+        if ab_len_sq == 0:
+            return a  # A and B are the same point
+
+        t = (ap_x * ab_x + ap_y * ab_y) / ab_len_sq
+
+        if t < 0.0:
+            return a
+        elif t > 1.0:
+            return b
+        else:
+            closest: Dict[str, Any] = {}
+            closest['x'] = a['x'] + t * ab_x
+            closest['y'] = a['y'] + t * ab_y
+            return closest
+
+    @staticmethod
     def calculate_speed(vx: float, vy: float) -> float:
         return math.sqrt(vx**2 + vy**2)
     
@@ -972,6 +996,24 @@ class PropositionEvaluators:
             logging.error(f"Error in deceleration_compliance_evaluator: {e}")
             return None
 
+#    @staticmethod
+#    def steering_rate_compliance_evaluator(data: Dict[str, Any], config: PropositionConfig, 
+#                                        safety_params: SafetyParameters) -> Optional[bool]:
+#        try:
+#            measured_data = data.get('steering_rate')
+#            
+#            if measured_data is None:
+#                return None
+#            
+#            measured_steering_rate = float(measured_data)
+#            threshold = config.threshold
+#            
+#            return measured_steering_rate <= threshold
+#            
+#        except Exception as e:
+#            logging.error(f"Error in steering_rate_compliance_evaluator: {e}")
+#            return None
+
     @staticmethod
     def _calculate_safe_distance(speed: float, safety_params: SafetyParameters) -> float:
         if speed <= safety_params.urban_speed_threshold:
@@ -989,6 +1031,7 @@ class ModelChecker:
             'deceleration_evaluator': PropositionEvaluators.deceleration_evaluator,
             'acceleration_compliance_evaluator': PropositionEvaluators.acceleration_compliance_evaluator,
             'deceleration_compliance_evaluator': PropositionEvaluators.deceleration_compliance_evaluator,
+#            'smooth_steering_evaluator': PropositionEvaluators.steering_rate_compliance_evaluator,
         }
 
     def _collect_goal_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
@@ -1211,7 +1254,6 @@ class ModelChecker:
                     other_vx = motion_state.get('vx')
                     other_vy = motion_state.get('vy')
 
-                    print(f"{other_x} {other_y} {other_vx} {other_vy}")
                     if None in [other_x, other_y, other_vx, other_vy]:
                         continue
 
@@ -1219,7 +1261,6 @@ class ModelChecker:
                         ego_x, ego_y, ego_vx, ego_vy,
                         other_x, other_y, other_vx, other_vy
                     )
-                    print(f"TTC: {ttc}")
                     if ttc is not None:
                         if statistics['min_ttc'] is None:
                             statistics['min_ttc'] = ttc
@@ -1230,13 +1271,84 @@ class ModelChecker:
                     threshold = prop_config.threshold
                     if ttc < threshold:
                         statistics['compliance_violations'] += 1
-
                 statistics['states_with_data'] += 1
             else:
                 statistics['states_without_data'] += 1
 
         except Exception as e:
-            logging.debug(f"Error collecting deceleration compliance statistics: {e}")
+            logging.debug(f"Error collecting ttc compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
+    def _collect_smooth_steering_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig, 
+                                                  statistics: Dict[str, Any]):
+        """Collect smooth steering compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            measured_data = aggregated_data.get('steering_rate')
+            
+            if measured_data is not None:
+                measured_val = float(measured_data)
+
+                if statistics['max_steering_rate'] is None:
+                    statistics['max_steering_rate'] = 0
+                if statistics['min_steering_rate'] is None:
+                    statistics['min_steering_rate'] = float('inf')
+
+                statistics['max_steering_rate'] = max(statistics['max_steering_rate'], measured_val)
+                statistics['min_steering_rate'] = min(statistics['min_steering_rate'], measured_val)
+
+                threshold = prop_config.threshold
+                if measured_val > threshold:
+                    statistics['compliance_violations'] += 1
+
+                statistics['states_with_data'] += 1
+        except Exception as e:
+            logging.debug(f"Error collecting smooth steering compliance statistics: {e}")
+            statistics['states_without_data'] += 1
+
+    def _collect_lanekeeping_compliance_statistics(self, state: VehicleState, prop_config: PropositionConfig,
+                                                  statistics: Dict[str, Any]):
+        """Collect deceleration compliance statistics"""
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            lane_data = aggregated_data.get('lane_info')
+            vehicle_data = aggregated_data.get('vehicle_state')
+            min_distance_on_map = float('inf')
+            x = DataTransforms.get_nested_value(vehicle_data, 'x')
+            y = DataTransforms.get_nested_value(vehicle_data, 'y')
+
+            if lane_data is not None and vehicle_data is not None:
+                road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+                for road in road_data:
+                    lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                    for lanes in lanes_data:
+                        center_points = DataTransforms.get_nested_value(lanes, 'center_points')
+                        if len(center_points) < 2:
+                            raise ValueError("At least two points are required to define a line")
+                        for i in range(len(center_points) - 1):
+                            a = center_points[i]
+                            b = center_points[i + 1]
+                            closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
+                            dist = DataTransforms.calculate_distance(x, y, closest['x'], closest['y'])
+                            if dist < min_distance_on_map:
+                                min_distance_on_map = dist
+
+                #the maximum of all minimum distances to centerline of each frame
+                statistics['max_distance'] = max(statistics.get('max_distance', 0), min_distance_on_map)
+
+                if 'distance_error_sum' not in statistics:
+                    statistics['distance_error_sum'] = 0
+                statistics['distance_error_sum'] += min_distance_on_map
+
+                threshold = prop_config.threshold
+                if min_distance_on_map > threshold:
+                    statistics['compliance_violations'] += 1
+                statistics['states_with_data'] += 1
+            else:
+                statistics['states_without_data'] += 1
+
+        except Exception as e:
+            logging.debug(f"Error collecting lanekeeping compliance statistics: {e}")
             statistics['states_without_data'] += 1
 
     def _evaluate_proposition(self, state: VehicleState, 
@@ -1323,7 +1435,10 @@ class ModelChecker:
             
             elif prop_type == PropositionType.SMOOTH_ACCELERATION:
                 return self._check_smooth_acceleration(state, prop_config)
-            
+
+            elif prop_type == PropositionType.SMOOTH_STEERING:
+                return self._check_smooth_steering(state, prop_config)
+
             else:
                 logging.warning(f"No evaluation method for proposition type: {prop_type}")
                 return None
@@ -1448,24 +1563,29 @@ class ModelChecker:
             aggregated_data = self._aggregate_data_sources(state, prop_config)
             lane_data = aggregated_data.get('lane_info')
             vehicle_data = aggregated_data.get('vehicle_state')
-            
             if not lane_data or not vehicle_data:
                 return None
             
-            lateral_deviation = DataTransforms.get_nested_value(lane_data, 'lateral_deviation')
-            if lateral_deviation is None:
-                ego_y = DataTransforms.get_nested_value(vehicle_data, 'y')
-                lane_center_y = DataTransforms.get_nested_value(lane_data, 'center_y')
-                
-                if ego_y is not None and lane_center_y is not None:
-                    lateral_deviation = abs(ego_y - lane_center_y)
-            
-            if lateral_deviation is None:
-                return None
-            
+            min_distance_on_map = float('inf')
+            x = DataTransforms.get_nested_value(vehicle_data, 'x')
+            y = DataTransforms.get_nested_value(vehicle_data, 'y')
+            road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+            for road in road_data:
+                lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                for lanes in lanes_data:
+                    center_points = DataTransforms.get_nested_value(lanes, 'center_points')
+                    if len(center_points) < 2:
+                        raise ValueError("At least two points are required to define a line")
+                    for i in range(len(center_points) - 1):
+                        a = center_points[i]
+                        b = center_points[i + 1]
+                        closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
+                        dist = DataTransforms.calculate_distance(x, y, closest['x'], closest['y'])
+                        if dist < min_distance_on_map:
+                            min_distance_on_map = dist
+
             threshold = prop_config.threshold or self.config.safety_params.lane_deviation_threshold
-            return lateral_deviation <= threshold
-            
+            return min_distance_on_map <= threshold
         except Exception as e:
             logging.error(f"Error in lane keeping check: {e}")
             return None
@@ -1529,6 +1649,21 @@ class ModelChecker:
             logging.error(f"Error in smooth acceleration check: {e}")
             return None
 
+    def _check_smooth_steering(self, state: VehicleState, prop_config: PropositionConfig) -> Optional[bool]:
+        try:
+            aggregated_data = self._aggregate_data_sources(state, prop_config)
+            steering_rate = aggregated_data.get('steering_rate')
+            if steering_rate is None:
+                return None
+
+            max_steering_rate = prop_config.threshold or self.config.safety_params.max_steering_rate
+            abs(steering_rate) <= max_steering_rate
+            return abs(steering_rate) <= max_steering_rate
+            
+        except Exception as e:
+            logging.error(f"Error in smooth acceleration check: {e}")
+            return None
+
     def get_formula(self, prop_config: PropositionConfig):
         atom = prop_config.atomic_prop
         
@@ -1565,7 +1700,8 @@ class ModelChecker:
         valid_states = []
         if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
                         PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE,
-                        PropositionType.TIME_TO_COLLISION]:
+                        PropositionType.TIME_TO_COLLISION, PropositionType.LANE_KEEPING]:
+
             for i, state in enumerate(limited_states):
                 prop_value = self._evaluate_proposition(state, prop_config, prop_type)
                 if prop_value is not None:
@@ -1619,6 +1755,17 @@ class ModelChecker:
                 'avg_ttc': None,
                 'sum_ttc': 0,
                 'goal_threshold': prop_config.threshold or self.config.safety_params.time_to_collision_threshold,
+                'states_with_data': 0,
+                'states_without_data': 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0
+            }
+        elif prop_type == PropositionType.SMOOTH_STEERING:
+            statistics = {
+                'max_steering_rate': None,
+                'min_steering_rate': None,
                 'states_with_data': 0,
                 'states_without_data': 0,
                 'valid_evaluations': 0,
@@ -1690,6 +1837,18 @@ class ModelChecker:
                 'measured_decelerations': [],
                 'commanded_decelerations': []
             }
+        elif prop_type == PropositionType.LANE_KEEPING:
+            statistics = {
+                'max_distance' : 0,
+                'avg_distance' : float('inf'),
+                'compliance_violations' : 0,
+                'states_with_data' : 0,
+                'states_without_data' : 0,
+                'valid_evaluations': 0,
+                'failed_evaluations': 0,
+                'true_evaluations': 0,
+                'false_evaluations': 0
+            }
 
         for kripke_state_id, (original_state_id, state, prop_value) in enumerate(valid_states):
             try:
@@ -1709,7 +1868,11 @@ class ModelChecker:
                     self._collect_deceleration_compliance_statistics(state, prop_config, statistics)
                 elif prop_type == PropositionType.TIME_TO_COLLISION:
                     self._collect_ttc_compliance_statistics(state, prop_config, statistics)
-                
+                elif prop_type == PropositionType.SMOOTH_STEERING:
+                    self._collect_smooth_steering_compliance_statistics(state, prop_config, statistics)
+                elif prop_type == PropositionType.LANE_KEEPING:
+                    self._collect_lanekeeping_compliance_statistics(state, prop_config, statistics)
+
                 if prop_value is not None:
                     atom = prop_config.atomic_prop
                     L[kripke_state_id] = {atom} if prop_value else {Not(atom)}
@@ -1718,10 +1881,10 @@ class ModelChecker:
                         statistics['true_evaluations'] += 1
                     else:
                         statistics['false_evaluations'] += 1
-                    
+
                     if kripke_state_id < 5:
                         logging.info(f"  Kripke State {kripke_state_id} (orig {original_state_id}): prop_value={prop_value}, label={atom if prop_value else f'Not({atom})'}")
-                        
+
             except Exception as e:
                 logging.warning(f"Error evaluating valid state {kripke_state_id}: {e}")
                 continue
@@ -1747,6 +1910,8 @@ class ModelChecker:
                 statistics['average_measured_deceleration'] = statistics.get('measured_decel_sum', 0) / statistics['deceleration_events']
                 statistics['average_commanded_deceleration'] = statistics.get('commanded_decel_sum', 0) / statistics['deceleration_events']
                 statistics['compliance_rate'] = (statistics['deceleration_events'] - statistics['compliance_violations']) / statistics['deceleration_events']
+        elif prop_type ==PropositionType.LANE_KEEPING:
+            statistics['distance_error_avg'] = statistics.get('distance_error_sum', 0) / statistics['states_with_data']
 
         if not L:
             return None, statistics
@@ -2008,7 +2173,7 @@ class VehicleMonitorAnalyzer:
             'success_rate': passed / total if total > 0 else 0.0,
             'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL'
         }
-        
+
         return results
 
     def _get_enabled_propositions(self, vehicle_config: VehicleConfig) -> Dict[str, PropositionConfig]:
@@ -2047,9 +2212,3 @@ class VehicleMonitorAnalyzer:
                 results[f'vehicle_{vehicle_config.id}'] = {'error': str(e)}
         
         return results
-
-def format_position(pos_dict):
-    """Format position dictionary for display"""
-    if pos_dict and isinstance(pos_dict, dict):
-        return f"({pos_dict.get('x', 'N/A'):.2f}, {pos_dict.get('y', 'N/A'):.2f})"
-    return "N/A"
