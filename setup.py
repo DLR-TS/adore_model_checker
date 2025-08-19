@@ -1,7 +1,6 @@
 from setuptools import setup, find_packages
 import os
 
-# Read requirements from requirements.txt
 def read_requirements():
     requirements_file = 'requirements.txt'
     if os.path.exists(requirements_file):
@@ -9,7 +8,6 @@ def read_requirements():
             return [line.strip() for line in f if line.strip() and not line.startswith('#')]
     return []
 
-# Read long description from README
 def read_readme():
     readme_file = 'README.md'
     if os.path.exists(readme_file):
@@ -28,7 +26,7 @@ setup(
     url="https://github.com/yourusername/adore-model-checker",
     
     packages=find_packages(include=['adore_model_checker', 'adore_model_checker.*']),
-    py_modules=['adore_model_checker_api_app'],
+    py_modules=['adore_model_checker_cli', 'adore_model_checker_api_app'],
 
     include_package_data=True,
     package_data={
@@ -46,9 +44,7 @@ setup(
 
     entry_points={
         'console_scripts': [
-            'adore-model-checker = adore_model_checker:main',
-            'model-checker = adore_model_checker:main',
-            'vehicle-monitor = adore_model_checker:main',
+            'adore-model-checker = adore_model_checker_cli:main',
             'adore-model-checker-api = adore_model_checker_api_app:main',
         ],
     },

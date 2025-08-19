@@ -4,6 +4,7 @@ import sys
 import argparse
 import os
 import logging
+import json
 
 def setup_imports():
     """Setup imports to work both when run directly and when installed as package"""

@@ -114,7 +114,7 @@ source /opt/ros/<your-ros-distro>/setup.bash
 
 Create a minimal configuration file:
 ```bash
-python3 adore_model_checker.py --create-minimal-config minimal_config.yaml
+python3 adore_model_checker_cli.py --create-minimal-config minimal_config.yaml
 ```
 
 ### 2. Configure Data Sources
@@ -147,13 +147,13 @@ vehicles:
 ### 3a. Online Monitoring
 Monitor a live vehicle for 60 seconds:
 ```bash
-python3 adore_model_checker.py --mode online --config your_config.yaml --vehicle-id 0 --duration 60
+python3 adore_model_checker_cli.py --mode online --config default.yaml --vehicle-id 0 --duration 60
 ```
 
 ### 3b. Offline Analysis 
 Analyze offline bag data:
 ```bash
-python3 adore_model_checker.py --mode offline --config your_config.yaml --bag-file data.bag
+python3 adore_model_checker_cli.py --mode offline --config default.yaml --bag-file data.bag
 ```
 
 ## Configuration
@@ -267,29 +267,29 @@ Each proposition can specify multiple data sources:
 ### Monitor with Debug Output
 
 ```bash
-python3 adore_model_checker.py --mode online --config config.yaml --vehicle-id 0 --duration 30 --debug
+python3 adore_model_checker_cli.py --mode online --config default.yaml --vehicle-id 0 --duration 30 --debug
 ```
 
 ### Monitor and Log 
 Monitor and log results to a json file:
 ```bash
-python3 adore_model_checker.py --mode online --config config.yaml --vehicle-id 0 --output results.json
+python3 adore_model_checker_cli.py --mode online --config default.yaml --vehicle-id 0 --output results.json
 ```
 
 ### Debug Mode with Data Recording
 ```bash
-python3 adore_model_checker.py --mode online --config config.yaml --vehicle-id 0 --debug-mode --data-file recorded_data.yaml
+python3 adore_model_checker_cli.py --mode online --config default.yaml --vehicle-id 0 --debug-mode --data-file recorded_data.yaml
 ```
 
 ### Analyze Recorded Data
 ```bash
-python3 adore_model_checker.py --mode offline --config config.yaml --data-file recorded_data.yaml
+python3 adore_model_checker_cli.py --mode offline --config default.yaml --data-file recorded_data.yaml
 ```
 
 ## Command Line Options
 
 ```
-usage: adore_model_checker.py [-h] --mode {online,offline} --config CONFIG
+usage: adore_model_checker_cli.py [-h] --mode {online,offline} --config CONFIG
                        [--bag-file BAG_FILE] [--vehicle-id VEHICLE_ID]
                        [--duration DURATION] [--output OUTPUT]
                        [--create-minimal-config CREATE_MINIMAL_CONFIG]
@@ -434,7 +434,7 @@ Running the following command while running the `simulation_scenario.py` scenari
 yields the following console output:
 Command:
 ```bash
-python3 adore_model_checker.py --mode online --config adore_safety_checks.yaml --vehicle-id 0 --duration 5 --output adore_safety_checks.json
+python3 adore_model_checker.py --mode online --config default.yaml --vehicle-id 0 --duration 5 --output safety_checks.json
 ```
 Console Output:
 ```text
@@ -472,7 +472,7 @@ DETAILED RESULTS:
                                      Distance threshold: 5.00m
                                      States with data: 0, without data: 11
 
-Results saved to: adore_safety_checks.json
+Results saved to: safety_checks.json
 ```
 Generated json Report:
 ```json
