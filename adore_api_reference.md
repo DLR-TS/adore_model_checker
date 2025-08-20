@@ -11,6 +11,9 @@ python3 adore_model_checker_api_app.py
 http://localhost:5000/api/model_check
 ```
 
+> **Note:** Port numbers may differ based on your configuration. Check the console output when starting the API for the actual port.
+
+
 ## Authentication
 Currently no authentication required.
 
