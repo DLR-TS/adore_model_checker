@@ -17,12 +17,18 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 import traceback
-import pkg_resources
+
+try:
+    from importlib.resources import files
+    from importlib.metadata import distribution
+except ImportError:
+    from importlib_resources import files
+    from importlib_metadata import distribution
+
 from pathlib import Path
 import shutil
 
 from .model_checker import VehicleMonitorAnalyzer, ConfigLoader, MonitoringConfig
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -108,11 +114,13 @@ class ConfigResolver:
         
         # 3. Try to use package data directory (if available and writable)
         try:
-            package_dir = Path(pkg_resources.resource_filename('adore_model_checker', ''))
-            package_config_dir = package_dir / 'config'
-            locations.append(str(package_config_dir))
-        except:
-            pass
+            # Use importlib.resources instead of pkg_resources
+            package_files = files('adore_model_checker')
+            if package_files:
+                package_config_dir = Path(str(package_files)) / 'config'
+                locations.append(str(package_config_dir))
+        except Exception as e:
+            logger.debug(f"Could not access package config directory: {e}")
         
         # 4. System config directory (if writable)
         system_config_dir = Path('/etc') / 'adore_model_checker'
@@ -145,21 +153,37 @@ class ConfigResolver:
     
     @staticmethod
     def _find_package_config(config_filename):
-        """Find config file in package data"""
+        """Find config file in package data using modern importlib.resources"""
         try:
-            package_configs = [
-                ('adore_model_checker', f'config/{config_filename}'),
-                ('adore_model_checker', config_filename),
+            # Try different possible locations within the package
+            config_locations = [
+                f'config/{config_filename}',
+                config_filename,
             ]
             
-            for package, resource_path in package_configs:
+            for resource_path in config_locations:
                 try:
-                    if pkg_resources.resource_exists(package, resource_path):
-                        config_path = pkg_resources.resource_filename(package, resource_path)
-                        if os.path.exists(config_path):
+                    # Use importlib.resources to check if file exists
+                    if '/' in resource_path:
+                        # Handle subdirectory case
+                        parts = resource_path.split('/')
+                        if len(parts) == 2:
+                            subdir, filename = parts
+                            package_files = files('adore_model_checker') / subdir
+                            if (package_files / filename).is_file():
+                                config_path = str(package_files / filename)
+                                logger.info(f"Found package config: {config_path}")
+                                return config_path
+                    else:
+                        # Handle root package case
+                        package_files = files('adore_model_checker')
+                        if (package_files / resource_path).is_file():
+                            config_path = str(package_files / resource_path)
                             logger.info(f"Found package config: {config_path}")
                             return config_path
-                except:
+                            
+                except Exception as e:
+                    logger.debug(f"Error checking resource {resource_path}: {e}")
                     continue
                     
         except Exception as e:
@@ -284,6 +308,7 @@ vehicles:
             logger.error(f"Could not create default config at {config_path}: {e}")
             raise
 
+# ... rest of the file remains the same ...
 class RunStatus(Enum):
     PENDING = "pending"
     RUNNING = "running" 
@@ -323,7 +348,6 @@ class ModelCheckCache:
             run_id = self.next_run_id
             self.next_run_id += 1
             
-            # Generate ISO8601 ZULU timestamp
             timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
             
             output_file = os.path.join(
@@ -388,7 +412,6 @@ class ModelCheckWorker:
     def stop(self):
         self.running = False
         
-        # Cancel any running processes
         with self.process_lock:
             for run_id, process in self.active_processes.items():
                 try:
@@ -428,7 +451,7 @@ class ModelCheckWorker:
             try:
                 self._process_pending_runs()
                 self._cleanup_completed_processes()
-                time.sleep(1)  # Check every second
+                time.sleep(1)
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
                 time.sleep(5)
@@ -441,7 +464,7 @@ class ModelCheckWorker:
         ]
         
         running_count = len(self.cache.get_running_runs())
-        max_concurrent = 2  # Configurable
+        max_concurrent = 2
         
         for run in pending_runs:
             if running_count >= max_concurrent:
@@ -490,7 +513,7 @@ class ModelCheckWorker:
                         run.vehicle_id or 0, 
                         run.duration or 60.0
                     )
-                else:  # offline
+                else:
                     results = analyzer.analyze_offline(run.bag_file)
                 
                 with open(run.output_file, 'w') as f:
@@ -658,7 +681,6 @@ class ModelCheckAPI:
         
         @bp.route('/config/list', methods=['GET'])
         def list_available_configs():
-            """List available config files in the config directory"""
             try:
                 config_files = []
                 if os.path.exists(self.config_directory):
