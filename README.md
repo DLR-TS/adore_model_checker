@@ -116,6 +116,7 @@ Create a minimal configuration file:
 ```bash
 python3 adore_model_checker_cli.py --create-minimal-config minimal_config.yaml
 ```
+> ℹ️ **Info:** If the ADORe model checker is installed as a package use `adore-model-checker`
 
 ### 2. Configure Data Sources
 
