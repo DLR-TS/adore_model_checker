@@ -152,6 +152,9 @@ python3 adore_model_checker_cli.py --mode online --config default.yaml --vehicle
 ```
 
 ### 3b. Offline Analysis 
+> ⚠️ **Warning**  
+> Offline bag checking mode is experimental and has not been fully tested.
+
 Analyze offline bag data:
 ```bash
 python3 adore_model_checker_cli.py --mode offline --config default.yaml --bag-file data.bag
