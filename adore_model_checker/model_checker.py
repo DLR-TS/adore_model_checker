@@ -1698,10 +1698,9 @@ class ModelChecker:
         limited_states = states[:max_states]
 
         valid_states = []
-        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, 
+        if prop_type in [PropositionType.EGO_SPEED, PropositionType.NEAR_GOAL, PropositionType.SMOOTH_STEERING,
                         PropositionType.ACCELERATION_COMPLIANCE, PropositionType.DECELERATION_COMPLIANCE,
-                        PropositionType.TIME_TO_COLLISION, PropositionType.LANE_KEEPING]:
-
+                        PropositionType.LANE_KEEPING]: #BAB: I think this must always run and the else never?
             for i, state in enumerate(limited_states):
                 prop_value = self._evaluate_proposition(state, prop_config, prop_type)
                 if prop_value is not None:
@@ -1976,28 +1975,43 @@ class VehicleMonitorAnalyzer:
     def __init__(self, config: MonitoringConfig):
         self.config = config
         self.model_checker = ModelChecker(config)
+
+    def _print_progress(self, message):
+        """Print progress message that can be captured by API"""
+        print(f"[PROGRESS]: {message}", flush=True)
     
     def analyze_online(self, vehicle_id: int, duration: float) -> Dict[str, Any]:
+        """Analyze vehicle behavior online"""
+        self._print_progress("Setting up online monitoring")
+        
         vehicle_config = next((v for v in self.config.vehicles if v.id == vehicle_id), None)
         if not vehicle_config:
             raise ValueError(f"Vehicle {vehicle_id} not found in configuration")
         
+        self._print_progress("Creating online monitor")
         monitor = OnlineMonitor(self.config, vehicle_config)
         
         try:
             start_time = time.time()
+            self._print_progress(f"Starting monitoring for {duration} seconds")
             logging.info(f"Starting online monitoring for vehicle {vehicle_id} for {duration} seconds...")
             
             while time.time() - start_time < duration:
+                elapsed = time.time() - start_time
+                if int(elapsed) % 10 == 0 and elapsed > 0:  # Progress every 10 seconds
+                    self._print_progress(f"Monitoring progress: {elapsed:.0f}/{duration:.0f} seconds")
                 time.sleep(0.1)
             
+            self._print_progress("Collecting monitored data")
             states = []
             while not monitor.data_buffer.empty():
                 state = monitor.data_buffer.get()
                 states.append(state)
             
+            self._print_progress(f"Collected {len(states)} states for analysis")
             logging.info(f"Collected {len(states)} states for analysis")
             
+            self._print_progress("Starting state analysis")
             return self._analyze_states(states, vehicle_config)
             
         finally:
@@ -2074,23 +2088,32 @@ class VehicleMonitorAnalyzer:
         results = {}
         enabled_propositions = self._get_enabled_propositions(vehicle_config)
         
+        self._print_progress(f"Analyzing {len(states)} states against {len(enabled_propositions)} propositions")
         logging.info(f"Analyzing {len(states)} states against {len(enabled_propositions)} propositions")
+        
+        total_props = len(enabled_propositions)
+        analyzed_props = 0
         
         for prop_name, prop_config in enabled_propositions.items():
             try:
+                analyzed_props += 1
+                self._print_progress(f"Analyzing proposition {prop_name} ({analyzed_props}/{total_props})")
                 logging.info(f"Starting analysis of {prop_name}")
+                
                 prop_type = PropositionType[prop_name]
                 
                 # Get human-readable description
                 description_info = prop_type.get_human_description()
                 formula_description = prop_type.get_formula_description(prop_config.formula_type)
                 
+                self._print_progress(f"Creating Kripke structure for {prop_name}")
                 logging.info(f"Creating Kripke structure for {prop_name}")
                 kripke, statistics = self.model_checker.create_kripke_from_states(
                     states, prop_config, prop_type
                 )
                 
                 if kripke:
+                    self._print_progress(f"Checking model for {prop_name}")
                     logging.info(f"Kripke structure created for {prop_name}, checking model")
                     formula = self.model_checker.get_formula(prop_config)
                     result = self.model_checker.check_model(kripke, formula)
@@ -2161,6 +2184,7 @@ class VehicleMonitorAnalyzer:
                     'group': 'unknown'
                 }
         
+        self._print_progress("Calculating summary statistics")
         passed = sum(1 for r in results.values() if r.get('result') is True)
         failed = sum(1 for r in results.values() if r.get('result') is False)
         total = passed + failed
@@ -2173,7 +2197,8 @@ class VehicleMonitorAnalyzer:
             'success_rate': passed / total if total > 0 else 0.0,
             'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL'
         }
-
+    
+        self._print_progress("State analysis completed")
         return results
 
     def _get_enabled_propositions(self, vehicle_config: VehicleConfig) -> Dict[str, PropositionConfig]:

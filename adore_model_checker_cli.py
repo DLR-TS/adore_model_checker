@@ -5,6 +5,7 @@ import argparse
 import os
 import logging
 import json
+import math
 
 def setup_imports():
     """Setup imports to work both when run directly and when installed as package"""
@@ -21,16 +22,140 @@ def setup_imports():
         from ros_marshaller import ROSMarshaller
         from bag_file_reader import BagFileReader
         from ros_message_importer import ROSMessageImporter
-        from model_checker import ConfigLoader
+        from model_checker import ConfigLoader, VehicleMonitorAnalyzer
         return ROSMarshaller, BagFileReader, ROSMessageImporter, ConfigLoader, VehicleMonitorAnalyzer
 
 ROSMarshaller, BagFileReader, ROSMessageImporter, ConfigLoader, VehicleMonitorAnalyzer = setup_imports()
+
+def sanitize_for_json(obj):
+    """Recursively sanitize data for JSON serialization, replacing infinity and NaN values"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None  # Replace infinity/NaN with null
+        return obj
+    return obj
+
+def print_state(state_message):
+    """Print state message in a format that can be parsed by the API"""
+    print(f"[STATE]: {state_message}")
+    sys.stdout.flush()
+
+def print_progress(progress_message):
+    """Print progress message that can be parsed by the API"""
+    print(f"[PROGRESS]: {progress_message}")
+    sys.stdout.flush()
 
 def format_position(pos_dict):
     """Format position dictionary for display"""
     if pos_dict and isinstance(pos_dict, dict):
         return f"({pos_dict.get('x', 'N/A'):.2f}, {pos_dict.get('y', 'N/A'):.2f})"
     return "N/A"
+
+def resolve_config_file(config_file_arg):
+    """
+    Resolve config file path with comprehensive fallback logic
+    Returns: (resolved_path, resolution_log)
+    """
+    config_resolution_log = []
+    resolved_config_path = None
+    
+    config_resolution_log.append(f"Requested config: {config_file_arg}")
+    
+    # First try to import ConfigResolver from the API module
+    try:
+        from adore_model_checker.model_checker_api import ConfigResolver
+        resolved_config_path = ConfigResolver.resolve_config_path(config_file_arg)
+        config_resolution_log.append(f"ConfigResolver succeeded: {resolved_config_path}")
+        return resolved_config_path, config_resolution_log
+        
+    except ImportError as e:
+        config_resolution_log.append(f"ConfigResolver import failed: {e}")
+        
+    except Exception as e:
+        config_resolution_log.append(f"ConfigResolver failed: {e}")
+    
+    # Fallback config resolution logic
+    
+    # If absolute path provided, check if it exists
+    if os.path.isabs(config_file_arg):
+        config_resolution_log.append(f"Checking absolute path: {config_file_arg}")
+        if os.path.exists(config_file_arg):
+            resolved_config_path = config_file_arg
+            config_resolution_log.append(f"Found absolute path: {resolved_config_path}")
+            return resolved_config_path, config_resolution_log
+        else:
+            config_resolution_log.append(f"Absolute path not found: {config_file_arg}")
+    
+    # Extract just the filename for searching
+    config_filename = os.path.basename(config_file_arg)
+    config_resolution_log.append(f"Searching for filename: {config_filename}")
+    
+    # Try various locations for the config file
+    search_paths = [
+        # Original path as provided
+        config_file_arg,
+        # Relative to current directory
+        os.path.join(os.getcwd(), config_filename),
+        # Relative to script directory
+        os.path.join(os.path.dirname(__file__), config_filename),
+        # In config subdirectory relative to script
+        os.path.join(os.path.dirname(__file__), 'config', config_filename),
+        # In parent config directory
+        os.path.join(os.path.dirname(__file__), '..', 'config', config_filename),
+        # Two levels up (for package structure)
+        os.path.join(os.path.dirname(__file__), '..', '..', 'config', config_filename),
+        # User config directory
+        os.path.join(os.path.expanduser('~'), '.config', 'adore_model_checker', config_filename),
+        # User local share directory
+        os.path.join(os.path.expanduser('~'), '.local', 'share', 'adore_model_checker', 'config', config_filename),
+        # System config directory
+        os.path.join('/etc', 'adore_model_checker', config_filename)
+    ]
+    
+    for i, path in enumerate(search_paths):
+        abs_path = os.path.abspath(path)
+        config_resolution_log.append(f"[{i+1}/{len(search_paths)}] Checking: {abs_path}")
+        
+        if os.path.exists(abs_path):
+            resolved_config_path = abs_path
+            config_resolution_log.append(f"Found at: {abs_path}")
+            return resolved_config_path, config_resolution_log
+        else:
+            config_resolution_log.append(f"Not found: {abs_path}")
+    
+    # No config found, create a default one
+    config_resolution_log.append("Creating default config file")
+    
+    # Choose a location to create the default config
+    default_locations = [
+        os.path.join(os.path.expanduser('~'), '.config', 'adore_model_checker'),
+        os.path.join(os.getcwd(), 'config'),
+        os.getcwd()
+    ]
+    
+    for config_dir in default_locations:
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+            resolved_config_path = os.path.join(config_dir, config_filename)
+            
+            # Create the default config
+            ConfigLoader.create_minimal_config(resolved_config_path)
+            config_resolution_log.append(f"Created default config at: {resolved_config_path}")
+            
+            return resolved_config_path, config_resolution_log
+            
+        except (PermissionError, OSError) as e:
+            config_resolution_log.append(f"Failed to create config in {config_dir}: {e}")
+            continue
+    
+    # If we get here, we couldn't find or create a config file
+    error_msg = f"Could not find or create config file '{config_file_arg}'"
+    config_resolution_log.append(f"{error_msg}")
+    raise FileNotFoundError(f"{error_msg}. Resolution log: {'; '.join(config_resolution_log)}")
 
 def main():
     parser = argparse.ArgumentParser(description='Dynamic ROS Model Checker for Vehicle Monitoring')
@@ -54,24 +179,59 @@ def main():
     args = parser.parse_args()
     
     if args.create_minimal_config:
+        print_state("CREATING_CONFIG")
         ConfigLoader.create_minimal_config(args.create_minimal_config)
         print(f"Minimal config created at: {args.create_minimal_config}")
         return
     
     try:
-        config = ConfigLoader.load_config(args.config)
+        print_state("INITIALIZING")
+        print(f"Model Checker starting in {args.mode} mode")
         
+        print_state("LOADING_CONFIG")
+        
+        # Resolve config path with comprehensive fallback logic
+        try:
+            resolved_config_path, config_log = resolve_config_file(args.config)
+            
+        except Exception as e:
+            print_state("ERROR")
+            print(f"Config resolution failed: {e}")
+            sys.exit(1)
+        
+        if not resolved_config_path or not os.path.exists(resolved_config_path):
+            print_state("ERROR")
+            print(f"Resolved config path is invalid: {resolved_config_path}")
+            sys.exit(1)
+        
+        print(f"Loading configuration from: {resolved_config_path}")
+        
+        # Load the configuration
+        try:
+            config = ConfigLoader.load_config(resolved_config_path)
+            print(f"Configuration loaded successfully from: {resolved_config_path}")
+        except Exception as e:
+            print_state("ERROR")
+            print(f"Failed to load config from {resolved_config_path}: {e}")
+            sys.exit(1)
+        
+        # Set up logging
         log_level = logging.DEBUG if args.debug else getattr(logging, config.log_level.upper())
         logging.basicConfig(
             level=log_level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         
+        # Start ROS services for online mode
         if args.mode == 'online':
+            print_state("STARTING_ROS_SERVICES")
             ROSMarshaller.start_metrics_reporter()
         
+        print_state("CREATING_ANALYZER")
         analyzer = VehicleMonitorAnalyzer(config)
+        print(f"Analyzer created with {len(config.vehicles)} vehicle configurations")
         
+        # Execute analysis based on mode
         if args.mode == 'offline':
             if not args.bag_file:
                 raise ValueError("Bag file required for offline mode")
@@ -79,18 +239,22 @@ def main():
             if not os.path.exists(args.bag_file):
                 raise FileNotFoundError(f"Bag file not found: {args.bag_file}")
             
+            print_state("STARTING_OFFLINE_ANALYSIS")
             print(f"Starting offline analysis of bag file: {args.bag_file}")
             results = analyzer.analyze_offline(args.bag_file)
         else:
             if args.vehicle_id is None:
                 raise ValueError("Vehicle ID required for online mode")
+            print_state("STARTING_ONLINE_MONITORING")
             print(f"Starting online monitoring for vehicle {args.vehicle_id} for {args.duration} seconds...")
             results = analyzer.analyze_online(args.vehicle_id, args.duration)
         
+        print_state("PROCESSING_RESULTS")
         print("=" * 60)
         print("DYNAMIC VEHICLE MONITORING RESULTS")
         print("=" * 60)
         
+        # Display results
         if isinstance(results, dict) and 'SUMMARY' in results:
             summary = results['SUMMARY']
             print(f"\nSUMMARY:")
@@ -210,14 +374,13 @@ def main():
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
 
                     elif prop_name == 'TIME_TO_COLLISION' and statistics:
-
                         min_ttc = statistics.get('min_ttc', 'N/A')
                         avg_ttc = statistics.get('avg_ttc', 'N/A')
                         violations = statistics.get('compliance_violations', 0)
                         compliance_rate = statistics.get('compliance_rate', 'N/A')
 
                         if min_ttc != 'N/A' and min_ttc != None:
-                            print(f"    {'':30}   Min TTC: {min_ttc:.3f} s, Avg TTC: {avg_ttc:.3f} m/s²")
+                            print(f"    {'':30}   Min TTC: {min_ttc:.3f} s, Avg TTC: {avg_ttc:.3f} s")
                             print(f"    {'':30}   Violations: {violations}")
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Compliance rate: {compliance_rate:.1%}")
@@ -230,12 +393,12 @@ def main():
                         violations = statistics.get('compliance_violations', 0)
                         compliance_rate = statistics.get('compliance_rate', 'N/A')
 
-                        if max_error != 'N/A':
+                        if max_distance != float('inf'):
                             print(f"    {'':30}   Max distance: {max_distance:.3f} m, Avg distance: {avg_distance:.3f} m")
                             if compliance_rate != 'N/A':
                                 print(f"    {'':30}   Violations: {violations}")
-
         else:
+            # Handle multi-vehicle results
             for vehicle_key, vehicle_results in results.items():
                 print(f"\n{vehicle_key.upper()}:")
                 print("-" * 30)
@@ -287,7 +450,6 @@ def main():
                             elif prop_name == 'SMOOTH_STEERING' and statistics:
                                 compliance_rate = statistics.get('compliance_rate', 'N/A')
                                 violations = statistics.get('compliance_violations', 0)
-                                events = statistics.get('max_steering_rate', 0)
                                 if compliance_rate != 'N/A':
                                     print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Violations: {violations}")
 
@@ -295,18 +457,31 @@ def main():
                                 compliance_rate = statistics.get('compliance_rate', 'N/A')
                                 violations = statistics.get('compliance_violations', 0)
                                 if compliance_rate != 'N/A':
-                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}, Events: {events}, Violations: {violations}")
+                                    print(f"      {'':25}   Compliance: {compliance_rate:.1%}")
 
                 else:
                     print(f"  Error: {vehicle_results.get('error', 'Unknown error')}")
-        
+ 
+        print_state("SAVING_RESULTS")
         if args.output:
+            # Sanitize results before saving to ensure valid JSON
+            sanitized_results = sanitize_for_json(results)
             with open(args.output, 'w') as f:
-                json.dump(results, f, indent=2, default=str)
+                json.dump(sanitized_results, f, indent=2, default=str)
             print(f"\nResults saved to: {args.output}")
+         
+        print_state("FINISHED")
+        print("Analysis completed successfully!")
+
+        
+        print_state("FINISHED")
+        print("Analysis completed successfully!")
                 
     except Exception as e:
-        logging.error(f"Analysis failed: {e}")
+        print_state("ERROR")
+        error_msg = f"Analysis failed: {e}"
+        print(f"ERROR: {error_msg}")
+        logging.error(error_msg)
         if args.debug:
             import traceback
             traceback.print_exc()
@@ -314,6 +489,7 @@ def main():
     
     finally:
         if args.mode == 'online':
+            print("Stopping ROSMarshaller threads...")
             ROSMarshaller.stop()
 
 if __name__ == '__main__':
