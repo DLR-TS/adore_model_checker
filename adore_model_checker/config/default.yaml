@@ -19,6 +19,16 @@ safety_parameters:
   
   speed_limit_tolerance: 2.0  # m/s over limit tolerance
   stop_line_tolerance: 0.3  # meters from stop line
+  
+  higher_speed_limit_tolerance: 4.0 # m/s higher over limit tolerance
+  speed_limit_tolerance_safety_score: 0.6 # Lower bound of safety score for speed limit tolerance
+  higher_speed_limit_tolerance_safety_score: 0.4 # Lower bound of safety score for higher speed limit tolerance
+
+  speed_safety_score_threshold: 0.6 # Below this average safety value the experiment fails
+  penal_safety_score: 0.7 # Any value of safety below this would be heavily penalized
+  speed_limit_safety_score_window: 5 # Number of historical speed data tolerated for violations
+  minimum_safety_score_weight: 0.1 # Minimum weight for penalizing speed limit violation
+  maximum_safety_score_weight: 0.5 # Maximum weight for penalizing speed limit violation
 
 vehicles:
   - id: 0

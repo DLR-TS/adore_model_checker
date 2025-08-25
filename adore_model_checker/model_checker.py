@@ -60,6 +60,7 @@ class PropositionGroup(Enum):
     ENVIRONMENTAL_ADAPTATION = "environmental_adaptation"
     MISSION_EFFICIENCY = "mission_efficiency"
     ADVANCED_MANEUVERS = "advanced_maneuvers"
+    SAFETY_SCORE="safety_score"
 
 class PropositionType(Enum):
     IN_COLLISION = ('IN_COLLISION', PropositionGroup.BASIC_SAFETY)
@@ -68,6 +69,7 @@ class PropositionType(Enum):
     SAFE_DISTANCE_X = ('SAFE_DISTANCE_X', PropositionGroup.BASIC_SAFETY)
     SAFE_DISTANCE_Y = ('SAFE_DISTANCE_Y', PropositionGroup.BASIC_SAFETY)
     DECELERATION = ('DECELERATION', PropositionGroup.BASIC_SAFETY)
+    SAFETY_SCORE = ('SAFETY_SCORE', PropositionGroup.SAFETY_SCORE)
     
     LANE_KEEPING = ('LANE_KEEPING', PropositionGroup.LANE_COMPLIANCE)
     LANE_CHANGE_SAFE = ('LANE_CHANGE_SAFE', PropositionGroup.LANE_COMPLIANCE)
@@ -157,6 +159,11 @@ class PropositionType(Enum):
                 'title': 'Safe Braking Behavior',
                 'description': 'Monitors that braking forces remain within safe limits to prevent loss of control',
                 'safety_rationale': 'Excessive braking can cause skidding, loss of control, or rear-end collisions from following vehicles'
+            },
+            'SAFETY_SCORE': {
+                'title': 'Safety Score based on Speed Limit',
+                'description': 'Quantified Score for Safety based on the speed of the vehicle compared to the speed limit',
+                'safety_rationale': 'Exceeding the speed limit is tolerated to a certain threshold, as this exceeded value increases, the safety should decrease within a tolerable level'
             },
 
             # Lane Compliance Propositions
@@ -366,6 +373,15 @@ class SafetyParameters:
     traffic_light_reaction_time: float = 1.0
     yield_detection_distance: float = 50.0
     speed_limit_tolerance: float = 5.0
+
+    higher_speed_limit_tolerance: float = 7.0
+    speed_limit_tolerance_safety_score: float = 0.3
+    higher_speed_limit_tolerance_safety_score: float = 0.0
+
+    penal_safety_score: float = 0.7
+    speed_limit_safety_score_window: int = 5
+    minimum_safety_score_weight: float = 0.1
+    maximum_safety_score_weight: float = 0.5
     
     time_to_collision_threshold: float = 3.0
     emergency_brake_deceleration: float = -8.0
@@ -407,7 +423,7 @@ class SafetyParameters:
     overtaking_gap_time: float = 5.0
     merging_gap_time: float = 4.0
     roundabout_entry_speed: float = 20.0
-construction_zone_speed_reduction: float = 0.7
+    construction_zone_speed_reduction: float = 0.7
 
 @dataclass
 class MonitoringConfig:
@@ -1071,7 +1087,7 @@ class ModelChecker:
             aggregated_data = self._aggregate_data_sources(state, prop_config)
             speed_source = list(prop_config.data_sources.keys())[0]
             speed_data = aggregated_data.get(speed_source)
-            
+
             if speed_data is not None:
                 speed = abs(float(speed_data))
                 statistics['max_velocity'] = max(statistics.get('max_velocity', 0), speed)
@@ -1081,6 +1097,14 @@ class ModelChecker:
                 if 'speed_sum' not in statistics:
                     statistics['speed_sum'] = 0
                 statistics['speed_sum'] += speed
+
+                speed_offset = float(speed_data) - self.config.safety_params.max_speed
+                safety_score = self._get_speed_safety_score(speed_offset)
+                statistics['average_safety_score'] = self._get_average_speed_safety_score(safety_score, statistics['average_safety_score'], statistics['safety_scores'])
+                
+                statistics['safety_scores'].append(safety_score)
+
+                #_get_speed_safety_score(offset)
             else:
                 statistics['states_without_data'] += 1
                 
@@ -1663,6 +1687,60 @@ class ModelChecker:
         except Exception as e:
             logging.error(f"Error in smooth acceleration check: {e}")
             return None
+    
+    def _get_speed_safety_score(self, vel_val: float):
+        # self.config.safety_params.max_speed
+        safe_val = 1.0
+        if (vel_val > self.config.safety_params.higher_speed_limit_tolerance):
+            safe_val = self.config.safety_params.higher_speed_limit_tolerance_safety_score
+        elif (vel_val > self.config.safety_params.speed_limit_tolerance):
+            sign_norm = self._safety_normalization_function(vel_val, self.config.safety_params.speed_limit_tolerance, 
+                                                            self.config.safety_params.higher_speed_limit_tolerance)
+            safe_val = self._scale_function(sign_norm, self.config.safety_params.speed_limit_tolerance_safety_score, 
+                                            self.config.safety_params.higher_speed_limit_tolerance_safety_score)
+        elif (vel_val > 0):
+            sign_norm = self._safety_normalization_function(vel_val, 0, self.config.safety_params.speed_limit_tolerance)
+            safe_val = self._scale_function(sign_norm, 1, self.config.safety_params.speed_limit_tolerance_safety_score)
+        return safe_val
+    
+    def _safety_normalization_function(self, value: float, upper: float, lower: float) -> float:
+        """Upper Bound is where system is more safe
+            Lower Bound is where system is less safe
+        """
+        norm = (value - lower) / (upper - lower)
+        # if lower > upper:
+        #     norm = 1 -norm
+        return norm
+    
+    def _scale_function(self, value: float, upper: float, lower: float) -> float:
+        """Scales a normalized value to the range [lower, upper]
+        """
+        scale = (upper - lower)*value + lower
+        return scale
+    
+    def _get_average_speed_safety_score(self, safety_score: float, last_safety_score: float, safety_scores_array: List[float]) -> float:
+        avg_safety_score = 0.0
+        # infringed_window = 0
+        # loop_window = min(self.config.safety_params.speed_limit_safety_score_window, len(safety_scores_array))
+
+        # start_counter = False
+        # for i in range(loop_window):
+        #     if safety_scores_array[len(safety_scores_array) - 1 - i] < self.config.safety_params.penal_safety_score and start_counter is False:
+        #         start_counter = True
+        #     if safety_scores_array[len(safety_scores_array) - 1 - i] < self.config.safety_params.penal_safety_score:
+        #         infringed_window += 1
+        #     if start_counter is True and safety_scores_array[len(safety_scores_array) - 1 - i] == 1.0:
+        #         break
+        
+        # if infringed_window >= self.config.safety_params.speed_limit_safety_score_window:
+        #     weight_1 = self.config.safety_params.maximum_safety_score_weight
+        #     weight_2 = 1.0 - weight_1
+        #     avg_safety_score = weight_1 * safety_score + weight_2 * last_safety_score
+        # else:
+            # avg_safety_score = (safety_score + sum(safety_scores_array))/(float(len(safety_scores_array)) + 1.0)
+        avg_safety_score = (safety_score + sum(safety_scores_array))/(float(len(safety_scores_array)) + 1.0)
+
+        return avg_safety_score
 
     def get_formula(self, prop_config: PropositionConfig):
         atom = prop_config.atomic_prop
@@ -1732,7 +1810,9 @@ class ModelChecker:
                 'failed_evaluations': 0,
                 'true_evaluations': 0,
                 'false_evaluations': 0,
-                'speed_values': []
+                'average_safety_score': 0.0,
+                'speed_values': [],
+                'safety_scores': []
             }
         elif prop_type == PropositionType.NEAR_GOAL:
             statistics = {
