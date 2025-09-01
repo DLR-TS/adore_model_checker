@@ -376,12 +376,21 @@ class SafetyParameters:
 
     higher_speed_limit_tolerance: float = 7.0
     speed_limit_tolerance_safety_score: float = 0.3
-    higher_speed_limit_tolerance_safety_score: float = 0.0
+    higher_speed_limit_tolerance_safety_score: float = 0.15
+    speed_limit_tolerance_threshold: float = 0.5
+    higher_speed_limit_tolerance_threshold: int = 5
+    speed_safety_score_threshold:  float = 0.4
+    speed_safety_score_grade_format: str = 'american'
 
-    penal_safety_score: float = 0.7
-    speed_limit_safety_score_window: int = 5
-    minimum_safety_score_weight: float = 0.1
-    maximum_safety_score_weight: float = 0.5
+    lower_lane_tolerance: float = 0.3
+    upper_lane_tolerance: float = 0.7
+    lower_lane_tolerance_safety_score: float = 0.7
+    lane_tolerance_safety_score: float = 0.3
+    upper_lane_tolerance_safety_score: float = 0.2
+    lane_tolerance_threshold: float = 0.5
+    uper_lane_tolerance_threshold: int = 3
+    lane_safety_score_threshold: float = 0.4
+    lane_safety_score_grade_format: str = 'american'
     
     time_to_collision_threshold: float = 3.0
     emergency_brake_deceleration: float = -8.0
@@ -1100,11 +1109,10 @@ class ModelChecker:
 
                 speed_offset = float(speed_data) - self.config.safety_params.max_speed
                 safety_score = self._get_speed_safety_score(speed_offset)
-                statistics['average_safety_score'] = self._get_average_speed_safety_score(safety_score, statistics['average_safety_score'], statistics['safety_scores'])
                 
                 statistics['safety_scores'].append(safety_score)
-
-                #_get_speed_safety_score(offset)
+                statistics['average_safety_score'] = self._get_guarded_speed_safety_score(statistics['safety_scores'], statistics['speed_values']) 
+                statistics['safety_grade'], statistics['safety_grade_format'] = self.get_grade_from_safety_score(statistics['average_safety_score'])
             else:
                 statistics['states_without_data'] += 1
                 
@@ -1368,6 +1376,14 @@ class ModelChecker:
                 if min_distance_on_map > threshold:
                     statistics['compliance_violations'] += 1
                 statistics['states_with_data'] += 1
+                
+                statistics['lane_values'].append(min_distance_on_map)
+
+                safety_score = self._get_lane_safety_score(min_distance_on_map)
+
+                statistics['safety_scores'].append(safety_score)
+                statistics['average_safety_score'] = self._get_guarded_lane_safety_score(statistics['safety_scores'], statistics['lane_values']) 
+                statistics['safety_grade'], statistics['safety_grade_format'] = self.get_grade_from_safety_score(statistics['average_safety_score'])
             else:
                 statistics['states_without_data'] += 1
 
@@ -1688,12 +1704,12 @@ class ModelChecker:
             logging.error(f"Error in smooth acceleration check: {e}")
             return None
     
-    def _get_speed_safety_score(self, vel_val: float):
+    def _get_speed_safety_score(self, vel_val: float) -> float:
         # self.config.safety_params.max_speed
         safe_val = 1.0
-        if (vel_val > self.config.safety_params.higher_speed_limit_tolerance):
+        if (vel_val >= self.config.safety_params.higher_speed_limit_tolerance):
             safe_val = self.config.safety_params.higher_speed_limit_tolerance_safety_score
-        elif (vel_val > self.config.safety_params.speed_limit_tolerance):
+        elif (vel_val >= self.config.safety_params.speed_limit_tolerance):
             sign_norm = self._safety_normalization_function(vel_val, self.config.safety_params.speed_limit_tolerance, 
                                                             self.config.safety_params.higher_speed_limit_tolerance)
             safe_val = self._scale_function(sign_norm, self.config.safety_params.speed_limit_tolerance_safety_score, 
@@ -1702,7 +1718,74 @@ class ModelChecker:
             sign_norm = self._safety_normalization_function(vel_val, 0, self.config.safety_params.speed_limit_tolerance)
             safe_val = self._scale_function(sign_norm, 1, self.config.safety_params.speed_limit_tolerance_safety_score)
         return safe_val
+
+    def _get_guarded_speed_safety_score(self, safety_array: List [float], speed_array: List[float]) -> float:
+        safe_val = 1.0
+
+        # average
+        safe_val = sum(safety_array) / len(safety_array)
     
+        # guard conditions
+        tolerance_violations = 0
+        higher_tolerance_violations = 0
+        for speed in speed_array:
+            if speed > self.config.safety_params.higher_speed_limit_tolerance:
+                higher_tolerance_violations += 1
+            if speed > self.config.safety_params.speed_limit_tolerance:
+                tolerance_violations += 1
+
+        if higher_tolerance_violations >= self.config.higher_speed_limit_tolerance_threshold:
+            if safe_val > self.config.higher_speed_limit_tolerance_safety_score:
+                safe_val = self.config.higher_speed_limit_tolerance_safety_score
+        elif (float(tolerance_violations)/len(speed_array)) >= self.config.speed_limit_tolerance_threshold:
+            if safe_val > self.config.speed_limit_tolerance_safety_score:
+                safe_val = self.config.speed_limit_tolerance_safety_score
+        return safe_val
+    
+    def _get_lane_safety_score(self, infringement: float) -> float:
+        safe_val = 1.0
+        if (infringement >= self.config.safety_params.upper_lane_tolerance):
+            safe_val = self.config.safety_params.upper_lane_tolerance_safety_score
+        elif (infringement >= self.config.safety_params.lane_deviation_threshold):
+            sign_norm = self._safety_normalization_function(infringement, self.config.safety_params.lane_deviation_threshold, 
+                                                            self.config.safety_params.upper_lane_tolerance)
+            safe_val = self._scale_function(sign_norm, self.config.safety_params.lane_tolerance_safety_score, 
+                                            self.config.safety_params.upper_lane_tolerance_safety_score_safety_score)
+        elif (infringement >= self.config.safety_params.lower_lane_tolerance):
+            sign_norm = self._safety_normalization_function(infringement, self.config.safety_params.lower_lane_tolerance, 
+                                                            self.config.safety_params.lane_deviation_threshold)
+            safe_val = self._scale_function(sign_norm, self.config.safety_params.lower_lane_tolerance_safety_score, 
+                                            self.config.safety_params.lane_tolerance_safety_score)
+        elif (infringement > 0):
+            sign_norm = self._safety_normalization_function(infringement, 0, 
+                                                            self.config.safety_params.lower_lane_tolerance)
+            safe_val = self._scale_function(sign_norm, 1, 
+                                            self.config.safety_params.lower_lane_tolerance_safety_score)
+        return safe_val
+    
+    def _get_guarded_lane_safety_score(self, safety_array: List [float], lane_array: List[float]) -> float:
+        safe_val = 1.0
+
+        # average
+        safe_val = sum(safety_array) / len(safety_array)
+    
+        # guard conditions
+        tolerance_violations = 0
+        upper_tolerance_violations = 0
+        for infringement in lane_array:
+            if infringement > self.config.safety_params.upper_lane_tolerance:
+                upper_tolerance_violations += 1
+            if infringement > self.config.safety_params.lane_deviation_threshold:
+                tolerance_violations += 1
+
+        if upper_tolerance_violations >= self.config.upper_lane_tolerance_threshold:
+            if safe_val > self.config.upper_lane_tolerance_safety_score:
+                safe_val = self.config.upper_lane_tolerance_safety_score
+        elif (float(tolerance_violations)/len(lane_array)) >= self.config.lane_tolerance_threshold:
+            if safe_val > self.config.lane_tolerance_safety_score:
+                safe_val = self.config.lane_tolerance_safety_score
+        return safe_val
+
     def _safety_normalization_function(self, value: float, upper: float, lower: float) -> float:
         """Upper Bound is where system is more safe
             Lower Bound is where system is less safe
@@ -1717,30 +1800,6 @@ class ModelChecker:
         """
         scale = (upper - lower)*value + lower
         return scale
-    
-    def _get_average_speed_safety_score(self, safety_score: float, last_safety_score: float, safety_scores_array: List[float]) -> float:
-        avg_safety_score = 0.0
-        # infringed_window = 0
-        # loop_window = min(self.config.safety_params.speed_limit_safety_score_window, len(safety_scores_array))
-
-        # start_counter = False
-        # for i in range(loop_window):
-        #     if safety_scores_array[len(safety_scores_array) - 1 - i] < self.config.safety_params.penal_safety_score and start_counter is False:
-        #         start_counter = True
-        #     if safety_scores_array[len(safety_scores_array) - 1 - i] < self.config.safety_params.penal_safety_score:
-        #         infringed_window += 1
-        #     if start_counter is True and safety_scores_array[len(safety_scores_array) - 1 - i] == 1.0:
-        #         break
-        
-        # if infringed_window >= self.config.safety_params.speed_limit_safety_score_window:
-        #     weight_1 = self.config.safety_params.maximum_safety_score_weight
-        #     weight_2 = 1.0 - weight_1
-        #     avg_safety_score = weight_1 * safety_score + weight_2 * last_safety_score
-        # else:
-            # avg_safety_score = (safety_score + sum(safety_scores_array))/(float(len(safety_scores_array)) + 1.0)
-        avg_safety_score = (safety_score + sum(safety_scores_array))/(float(len(safety_scores_array)) + 1.0)
-
-        return avg_safety_score
 
     def get_formula(self, prop_config: PropositionConfig):
         atom = prop_config.atomic_prop
@@ -1811,6 +1870,8 @@ class ModelChecker:
                 'true_evaluations': 0,
                 'false_evaluations': 0,
                 'average_safety_score': 0.0,
+                'safety_grade': "",
+                'safety_grade_format': "",
                 'speed_values': [],
                 'safety_scores': []
             }
@@ -1926,7 +1987,12 @@ class ModelChecker:
                 'valid_evaluations': 0,
                 'failed_evaluations': 0,
                 'true_evaluations': 0,
-                'false_evaluations': 0
+                'false_evaluations': 0,
+                'average_safety_score': 0.0,
+                'safety_grade': "",
+                'safety_grade_format': "",
+                'lane_values': [],
+                'safety_scores': []
             }
 
         for kripke_state_id, (original_state_id, state, prop_value) in enumerate(valid_states):
@@ -2001,6 +2067,65 @@ class ModelChecker:
         logging.info(f"  False evaluations: {statistics.get('false_evaluations', 0)}")
 
         return Kripke(R=R, L=L), statistics
+    
+    def get_grade_from_safety_score(self, safety_score: float, grade_format: str) -> str | str:
+        if grade_format == 'american':
+            grade_value = 'A'
+            if safety_score <= 0.4:
+                grade_value = 'F'
+            elif safety_score <= 0.45:
+                grade_value = 'D-'
+            elif safety_score <= 0.5:
+                grade_value = 'D'
+            elif safety_score <= 0.55:
+                grade_value = 'D+'
+            elif safety_score <= 0.6:
+                grade_value = 'C-'
+            elif safety_score <= 0.65:
+                grade_value = 'C'
+            elif safety_score <= 0.7:
+                grade_value = 'C+'
+            elif safety_score <= 0.8:
+                grade_value = 'B-'
+            elif safety_score <= 0.85:
+                grade_value = 'B'
+            elif safety_score <= 0.9:
+                grade_value = 'B+'
+            elif safety_score <= 0.95:
+                grade_value = 'A-'
+            
+            return grade_value, grade_format
+
+        elif grade_format == 'german':
+            grade_value = '1.0'
+            if safety_score <= 0.4:
+                grade_value = '5.0'
+            elif safety_score <= 0.45:
+                grade_value = '4.0'
+            elif safety_score <= 0.5:
+                grade_value = '4.0'
+            elif safety_score <= 0.55:
+                grade_value = '3.7'
+            elif safety_score <= 0.6:
+                grade_value = '3.3'
+            elif safety_score <= 0.65:
+                grade_value = '3.0'
+            elif safety_score <= 0.7:
+                grade_value = '2.7'
+            elif safety_score <= 0.8:
+                grade_value = '2.3'
+            elif safety_score <= 0.85:
+                grade_value = '2.0'
+            elif safety_score <= 0.9:
+                grade_value = '1.7'
+            elif safety_score <= 0.95:
+                grade_value = '1.3'
+            
+            return grade_value, grade_format
+            
+        else:
+            return 'None', 'None'
+            # No Output
     
     def check_model(self, kripke: Kripke, formula) -> bool:
         """Check if Kripke structure satisfies the formula from initial state"""
