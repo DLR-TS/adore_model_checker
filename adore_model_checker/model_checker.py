@@ -1357,7 +1357,7 @@ class ModelChecker:
                         center_points = DataTransforms.get_nested_value(lanes, 'center_points')
                         if len(center_points) < 2:
                             raise ValueError("At least two points are required to define a line")
-                        for i in range(len(center_points) - 1):
+                        for i in range(len(center_points) - 2):
                             a = center_points[i]
                             b = center_points[i + 1]
                             closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
@@ -1616,7 +1616,7 @@ class ModelChecker:
                     center_points = DataTransforms.get_nested_value(lanes, 'center_points')
                     if len(center_points) < 2:
                         raise ValueError("At least two points are required to define a line")
-                    for i in range(len(center_points) - 1):
+                    for i in range(len(center_points) - 2):
                         a = center_points[i]
                         b = center_points[i + 1]
                         closest = DataTransforms.closest_point_on_segment_2d(x, y, a, b)
