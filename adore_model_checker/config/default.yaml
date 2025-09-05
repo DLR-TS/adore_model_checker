@@ -19,6 +19,25 @@ safety_parameters:
   
   speed_limit_tolerance: 2.0  # m/s over limit tolerance
   stop_line_tolerance: 0.3  # meters from stop line
+  
+  higher_speed_limit_tolerance: 4.0 # m/s higher over limit tolerance
+  speed_limit_tolerance_safety_score: 0.3 # lower bound of safety score for speed_limit_tolerance
+  higher_speed_limit_tolerance_safety_score: 0.15 # lower bound of safety score for higher_speed_limit_tolerance
+  speed_limit_tolerance_threshold: 0.5 # fraction of Total Test; number of times the speed_limit_tolerance can be exceeded in a test
+  higer_speed_limit_tolerance_threshold: 5 # total number of times the higher_speed_limit_tolerance can be exceeded in a test
+  speed_safety_score_threshold: 0.4 # below this average safety value the experiment fails
+  speed_safety_score_grade_format: 'both' # convert safety score to american, german or both grade scala
+
+  lower_lane_tolerance: 0.3 # m out of bounds of the lanes
+  lane_deviation_threshold: 0.5 # m out of bounds of the lanes; in compliance with the threshold
+  upper_lane_tolerance: 0.7 # m out of bounds of the lanes
+  lower_lane_tolerance_safety_score: 0.7 # lower bound of the safety score for lower_lane_tolerance
+  lane_tolerance_safety_score: 0.3 # lower bound of the safety score for lane_tolerance
+  upper_lane_tolerance_safety_score: 0.2 # lower bound of the safety score for upper_lane_tolerance
+  lane_tolerance_threshold: 0.5 # Fraction of Total Test; number of times the lane_tolerance can be exceeded in a test
+  upper_lane_tolerance_threshold: 3 # total number of times the upper_lane_tolerance can be exceeded in a test
+  lane_safety_score_threshold: 0.4 # below this average safety value the experiment fails
+  lane_safety_score_grade_format: 'both' # Convert safety score to american, german or both grade scala
 
 vehicles:
   - id: 0
