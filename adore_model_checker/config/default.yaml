@@ -163,7 +163,7 @@ vehicles:
 
       # DYNAMIC SAFETY CHECKS (DISABLED FOR NOW)
       TIME_TO_COLLISION:
-        enabled: true
+        enabled: false
         atomic_prop: 'ttc_safe'
         formula_type: 'always'
         threshold: 3.0  # Minimum TTC in seconds

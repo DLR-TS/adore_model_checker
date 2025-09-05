@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM debian:bullseye-slim AS adore_model_checker_builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -30,3 +30,5 @@ WORKDIR /output
 
 VOLUME ["/output"]
 
+FROM alpine:3.22 AS adore_model_checker_release
+COPY --from=adore_model_checker_builder /build /build
