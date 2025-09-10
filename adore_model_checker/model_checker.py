@@ -1731,9 +1731,9 @@ class ModelChecker:
         tolerance_violations = 0
         higher_tolerance_violations = 0
         for speed in speed_array:
-            if speed > self.config.safety_params.higher_speed_limit_tolerance:
+            if (speed - self.config.safety_params.max_speed) > self.config.safety_params.higher_speed_limit_tolerance:
                 higher_tolerance_violations += 1
-            if speed > self.config.safety_params.speed_limit_tolerance:
+            if (speed - self.config.safety_params.max_speed) > self.config.safety_params.speed_limit_tolerance:
                 tolerance_violations += 1
 
         if higher_tolerance_violations >= self.config.safety_params.higher_speed_limit_tolerance_threshold:
