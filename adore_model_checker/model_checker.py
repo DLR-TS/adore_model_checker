@@ -1731,9 +1731,9 @@ class ModelChecker:
         tolerance_violations = 0
         higher_tolerance_violations = 0
         for speed in speed_array:
-            if speed > self.config.safety_params.higher_speed_limit_tolerance:
+            if (speed - self.config.safety_params.max_speed) > self.config.safety_params.higher_speed_limit_tolerance:
                 higher_tolerance_violations += 1
-            if speed > self.config.safety_params.speed_limit_tolerance:
+            if (speed - self.config.safety_params.max_speed) > self.config.safety_params.speed_limit_tolerance:
                 tolerance_violations += 1
 
         if higher_tolerance_violations >= self.config.safety_params.higher_speed_limit_tolerance_threshold:
@@ -2157,7 +2157,7 @@ class ModelChecker:
             return 'None', 'None'
             # No Output
     
-    def check_model(self, kripke: Kripke, formula) -> bool:
+    def check_model(self, kripke: Kripke, statistics: Dict[str, Any], formula) -> bool:
         """Check if Kripke structure satisfies the formula from initial state"""
         try:
             import sys
@@ -2183,6 +2183,14 @@ class ModelChecker:
                 logging.info(f"Formula satisfied: {satisfies_formula}")
                 
                 atom_name = None
+
+                # safety_score check
+                if 'average_safety_score' in statistics:
+                    if statistics['average_safety_score'] > 0.4:
+                        return True
+                    else:
+                        return False
+
                 if hasattr(formula, 'formula') and hasattr(formula.formula, 'formula'):
                     atom = formula.formula.formula
                     atom_name = str(atom)
@@ -2351,7 +2359,7 @@ class VehicleMonitorAnalyzer:
                     self._print_progress(f"Checking model for {prop_name}")
                     logging.info(f"Kripke structure created for {prop_name}, checking model")
                     formula = self.model_checker.get_formula(prop_config)
-                    result = self.model_checker.check_model(kripke, formula)
+                    result = self.model_checker.check_model(kripke, statistics, formula)
                     results[prop_name] = {
                         'result': result,
                         'status': 'PASS' if result else 'FAIL',

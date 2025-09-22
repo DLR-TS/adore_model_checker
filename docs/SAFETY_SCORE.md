@@ -25,3 +25,16 @@ The safety score quantifies the safety related to the velocity profile of the `E
 # Safety Score to Grading
 
 -> German and American System
+
+# Tasks
+
+- [ ] Write about CTL
+- [ ] Write about Safety Score
+- [ ] Due Diligence: Lit Review
+- [ ] What is already available
+- [ ] What is missing from lit
+- [ ] Model Checking Lit
+- [ ] Hybrid Approach Lit
+- [ ] Setting the bounding conditions and guard conditions
+- [ ] Boundaries For lane: i.e. size of lane
+- [ ] Boundaries For Speed: i.e. based on max speed

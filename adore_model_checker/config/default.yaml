@@ -32,7 +32,7 @@ safety_parameters:
   lane_deviation_threshold: 0.5 # m out of bounds of the lanes; in compliance with the threshold
   upper_lane_tolerance: 0.7 # m out of bounds of the lanes
   lower_lane_tolerance_safety_score: 0.7 # lower bound of the safety score for lower_lane_tolerance
-  lane_tolerance_safety_score: 0.3 # lower bound of the safety score for lane_tolerance
+  lane_tolerance_safety_score: 0.35 # lower bound of the safety score for lane_tolerance
   upper_lane_tolerance_safety_score: 0.2 # lower bound of the safety score for upper_lane_tolerance
   lane_tolerance_threshold: 0.5 # Fraction of Total Test; number of times the lane_tolerance can be exceeded in a test
   upper_lane_tolerance_threshold: 3 # total number of times the upper_lane_tolerance can be exceeded in a test
