@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adore-model-checker"
+version = "0.1.0"
+description = "Dynamic ROS Model Checker for Vehicle Safety Monitoring and Verification"
+readme = {file = "README.md", content-type = "text/markdown"}
+requires-python = ">=3.8"
+
+license = { file = "LICENSE" }
+
+authors = [
+    {name = "DLR-TS", email = "opensource-ts@dlr.de"},
+]
+
+keywords = [
+    "ros2",
+    "model-checking",
+    "safety",
+    "verification",
+    "autonomous-vehicles",
+    "temporal-logic",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Monitoring",
+]
+
+# We keep dependencies in requirements.txt and point setuptools at it
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "mypy",
+]
+api = [
+    "flask>=2.0",
+    "werkzeug>=2.0",
+]
+plotting = [
+    "matplotlib>=3.0",
+    "seaborn>=0.11",
+]
+all = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "flake8",
+    "mypy",
+    "flask>=2.0",
+    "werkzeug>=2.0",
+    "matplotlib>=3.0",
+    "seaborn>=0.11",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/TS/adore-model-checker"
+"Bug Reports" = "https://github.com/TS/adore-model-checker/issues"
+"Source" = "https://github.com/TS/adore-model-checker"
+"Documentation" = "https://github.com/TS/adore-model-checker/wiki"
+
+[project.scripts]
+"adore-model-checker" = "adore_model_checker_cli:main"
+"adore-model-checker-api" = "adore_model_checker_api_app:main"
+
+[tool.setuptools]
+zip-safe = false
+include-package-data = true
+py-modules = ["adore_model_checker_cli", "adore_model_checker_api_app"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.pip3"]}
+
+[tool.setuptools.packages.find]
+include = ["adore_model_checker", "adore_model_checker.*"]
+
+[tool.setuptools.package-data]
+"adore_model_checker" = [
+    "config/*.yaml",
+    "config/*.yml",
+    "*.yaml",
+    "*.yml",
+]
+"*" = [
+    "config/*.yaml",
+    "config/*.yml",
+]

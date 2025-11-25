@@ -16,7 +16,7 @@ install: _install clean
 
 .PHONY: _install
 _install:
-	python3 setup.py install
+	pip install .
 
 .PHONY: clean
 clean:
