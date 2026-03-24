@@ -8,10 +8,11 @@ TAG      := $(ARCH)_$(shell git rev-parse --short HEAD 2>/dev/null || echo NOHAS
 REPO     ?= $(shell git config --get remote.origin.url 2>/dev/null \
               | sed -e 's|.*github.com[:/]||' -e 's|\.git$$||' \
               | tr '[:upper:]' '[:lower:]')
+REPO_LC  := $(shell echo "$(REPO)" | tr '[:upper:]' '[:lower:]')
 
-DOCKER_IMAGE        := adore-model-checker-deb-builder:$(TAG)
-REGISTRY_IMAGE      := ghcr.io/$(REPO)/adore-model-checker-deb-builder:$(TAG)
-REGISTRY_IMAGE_LATEST := ghcr.io/$(REPO)/adore-model-checker-deb-builder:latest
+DOCKER_IMAGE          := adore-model-checker:$(TAG)
+REGISTRY_IMAGE        := ghcr.io/$(REPO_LC)/adore-model-checker:$(TAG)
+REGISTRY_IMAGE_LATEST := ghcr.io/$(REPO_LC)/adore-model-checker:latest
 
 .PHONY: build
 build:
