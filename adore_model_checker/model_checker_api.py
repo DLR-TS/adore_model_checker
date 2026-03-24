@@ -690,9 +690,9 @@ class ModelCheckWorker:
                 
                 try:
                     cmd_variants = [
-                        ['python', '-m', 'adore_model_checker.adore_model_checker_cli'],
+                        [sys.executable, '-m', 'adore_model_checker_cli'],
                         ['adore-model-checker'],
-                        ['python', '-c', 'from adore_model_checker.adore_model_checker_cli import main; main()']
+                        [sys.executable, '-c', 'from adore_model_checker_cli import main; main()']
                     ]
                     
                     base_args = [
