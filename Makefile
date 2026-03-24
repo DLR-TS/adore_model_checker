@@ -10,21 +10,15 @@ REPO     ?= $(shell git config --get remote.origin.url 2>/dev/null \
               | tr '[:upper:]' '[:lower:]')
 REPO_LC  := $(shell echo "$(REPO)" | tr '[:upper:]' '[:lower:]')
 
-DOCKER_IMAGE          := adore-model-checker:$(TAG)
-REGISTRY_IMAGE        := ghcr.io/$(REPO_LC)/adore-model-checker:$(TAG)
-REGISTRY_IMAGE_LATEST := ghcr.io/$(REPO_LC)/adore-model-checker:latest
+DOCKER_IMAGE     := adore-model-checker:$(TAG)
+REGISTRY_IMAGE   := ghcr.io/$(REPO_LC)/adore-model-checker:$(TAG)
 
 .PHONY: build
 build:
 	mkdir -p $(BUILD_DIR)
-	@echo "Attempting to pull $(REGISTRY_IMAGE) from registry..."
-	docker pull "$(REGISTRY_IMAGE)" 2>/dev/null && \
-	    docker tag  "$(REGISTRY_IMAGE)" "$(DOCKER_IMAGE)" || \
-	docker pull "$(REGISTRY_IMAGE_LATEST)" 2>/dev/null && \
-	    docker tag  "$(REGISTRY_IMAGE_LATEST)" "$(DOCKER_IMAGE)" || \
-	    echo "No cached image found, building from scratch..."
+	docker pull "$(REGISTRY_IMAGE)" 2>/dev/null || true
 	docker build \
-	    --cache-from "$(DOCKER_IMAGE)" \
+	    --cache-from "$(REGISTRY_IMAGE)" \
 	    -t "$(DOCKER_IMAGE)" \
 	    .
 	docker run --rm -v "$(BUILD_DIR)":"$(OUTPUT_DIR)" "$(DOCKER_IMAGE)"
@@ -34,8 +28,6 @@ build:
 push: ## Push image to ghcr.io
 	docker tag  "$(DOCKER_IMAGE)" "$(REGISTRY_IMAGE)"
 	docker push "$(REGISTRY_IMAGE)"
-	docker tag  "$(DOCKER_IMAGE)" "$(REGISTRY_IMAGE_LATEST)"
-	docker push "$(REGISTRY_IMAGE_LATEST)"
 
 .PHONY: install
 install: _install clean
