@@ -16,7 +16,8 @@ REGISTRY_IMAGE   := ghcr.io/$(REPO_LC)/adore-model-checker:$(TAG)
 .PHONY: build
 build:
 	mkdir -p $(BUILD_DIR)
-	docker pull "$(REGISTRY_IMAGE)" 2>/dev/null || true
+	docker pull "$(REGISTRY_IMAGE)" 2>/dev/null && \
+	    docker tag "$(REGISTRY_IMAGE)" "$(DOCKER_IMAGE)" || \
 	docker build \
 	    --cache-from "$(REGISTRY_IMAGE)" \
 	    -t "$(DOCKER_IMAGE)" \
