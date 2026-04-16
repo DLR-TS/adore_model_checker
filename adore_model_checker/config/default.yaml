@@ -63,7 +63,7 @@ vehicles:
         threshold: 13.89  # Max speed m/s (50 kph for German residential streets)
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'vx'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -80,7 +80,7 @@ vehicles:
             field_path: ''  
             cache_duration: 5.0
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''  
             cache_duration: 0.1
         evaluation_function: 'near_goal_evaluator'
@@ -92,7 +92,7 @@ vehicles:
         threshold: -6.0  # Maximum safe deceleration in m/s² (negative value)
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'ax'
             cache_duration: 0.1
           brake_status:
@@ -109,7 +109,7 @@ vehicles:
         threshold: 1.5  # Maximum allowed error in m/s² for acceleration
         data_sources:
           measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'ax'
             cache_duration: 0.1
           commanded_acceleration:
@@ -125,7 +125,7 @@ vehicles:
         threshold: 2.0  # Maximum allowed error in m/s² for deceleration
         data_sources:
           measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'ax'
             cache_duration: 0.1
           commanded_acceleration:
@@ -140,7 +140,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
@@ -155,7 +155,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
@@ -171,7 +171,7 @@ vehicles:
         threshold: 0.5
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           lane_info:
@@ -188,7 +188,7 @@ vehicles:
         threshold: 3.0  # Minimum TTC in seconds
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
@@ -204,7 +204,7 @@ vehicles:
         threshold: -8.0  # Max emergency deceleration
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           brake_system:
@@ -220,7 +220,7 @@ vehicles:
         threshold: 2.0  # Max comfortable acceleration
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'ax'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -233,7 +233,7 @@ vehicles:
         threshold: 45.0  # Max comfortable steering rate
         data_sources:
           steering_rate:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'steering_rate'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -246,7 +246,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'vx'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -262,7 +262,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           traffic_light:
@@ -277,7 +277,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           stop_sign:

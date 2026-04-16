@@ -1352,12 +1352,17 @@ class ModelChecker:
 
             if lane_data is not None and vehicle_data is not None:
                 road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+                if not road_data:
+                    statistics['states_without_data'] += 1
+                    return
                 for road in road_data:
                     lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                    if not lanes_data:
+                        continue
                     for lanes in lanes_data:
                         center_points = DataTransforms.get_nested_value(lanes, 'center_points')
-                        if len(center_points) < 2:
-                            raise ValueError("At least two points are required to define a line")
+                        if not center_points or len(center_points) < 2:
+                            continue
                         for i in range(len(center_points) - 2):
                             a = center_points[i]
                             b = center_points[i + 1]
@@ -1612,12 +1617,16 @@ class ModelChecker:
             x = DataTransforms.get_nested_value(vehicle_data, 'x')
             y = DataTransforms.get_nested_value(vehicle_data, 'y')
             road_data = DataTransforms.get_nested_value(lane_data, 'roads')
+            if not road_data:
+                return None
             for road in road_data:
                 lanes_data = DataTransforms.get_nested_value(road, 'lanes')
+                if not lanes_data:
+                    continue
                 for lanes in lanes_data:
                     center_points = DataTransforms.get_nested_value(lanes, 'center_points')
-                    if len(center_points) < 2:
-                        raise ValueError("At least two points are required to define a line")
+                    if not center_points or len(center_points) < 2:
+                        continue
                     for i in range(len(center_points) - 2):
                         a = center_points[i]
                         b = center_points[i + 1]
@@ -1626,6 +1635,8 @@ class ModelChecker:
                         if dist < min_distance_on_map:
                             min_distance_on_map = dist
 
+            if min_distance_on_map == float('inf'):
+                return None
             threshold = prop_config.threshold or self.config.safety_params.lane_deviation_threshold
             return min_distance_on_map <= threshold
         except Exception as e:
@@ -2185,7 +2196,7 @@ class ModelChecker:
                 atom_name = None
 
                 # safety_score check
-                if 'average_safety_score' in statistics:
+                if 'average_safety_score' in statistics and statistics.get('states_with_data', 0) > 0:
                     if statistics['average_safety_score'] > 0.4:
                         return True
                     else:
