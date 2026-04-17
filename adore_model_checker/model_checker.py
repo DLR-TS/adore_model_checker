@@ -887,7 +887,7 @@ class PropositionEvaluators:
             
             if speed_data is None:
                 logging.debug(f"Speed evaluator: No data for source '{speed_source}' in data keys: {list(data.keys())}")
-                return True
+                return None
             
             speed = float(speed_data)
             abs_speed = abs(speed)
@@ -901,7 +901,7 @@ class PropositionEvaluators:
             
         except Exception as e:
             logging.error(f"Error in speed_limit_evaluator: {e}")
-            return True
+            return None
 
     @staticmethod
     def longitudinal_safety_evaluator(data: Dict[str, Any], config: PropositionConfig, 
