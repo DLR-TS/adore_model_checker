@@ -11,7 +11,7 @@ safety_parameters:
   
   time_to_collision_threshold: 3.0  # seconds minimum TTC
   emergency_brake_deceleration: -8.0  # m/s² max emergency braking
-  goal_reach_distance: 5.0  # meters to consider goal reached
+  goal_reach_distance: 6.0  # meters to consider goal reached
   
   max_acceleration_rate: 2.0  # m/s² comfortable acceleration
   max_deceleration_rate: -3.0  # m/s² comfortable braking

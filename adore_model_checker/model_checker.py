@@ -49,6 +49,51 @@ class MonitoringMode(Enum):
     OFFLINE = "offline"
     ONLINE = "online"
 
+class DQSLabel(Enum):
+    CRITICAL   = "CRITICAL"
+    POOR       = "POOR"
+    DEGRADED   = "DEGRADED"
+    ACCEPTABLE = "ACCEPTABLE"
+    GOOD       = "GOOD"
+
+def compute_dqs(statistics: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute a Data Quality Score [0-1] from proposition statistics.
+
+    temporal_quality: fraction of states that had usable data.
+    value_quality:    fraction of evaluations that produced a valid (non-None) result.
+    dqs:              weighted combination, 0.6 temporal + 0.4 value.
+    """
+    states_with    = statistics.get('states_with_data', 0)
+    states_without = statistics.get('states_without_data', 0)
+    total_states   = states_with + states_without
+
+    valid   = statistics.get('valid_evaluations', 0)
+    failed  = statistics.get('failed_evaluations', 0)
+    total_evals = valid + failed
+
+    temporal_quality = states_with / total_states if total_states > 0 else 0.0
+    value_quality    = valid / total_evals         if total_evals > 0  else 0.0
+
+    dqs = 0.6 * temporal_quality + 0.4 * value_quality
+
+    if dqs >= 0.9:
+        label = DQSLabel.GOOD
+    elif dqs >= 0.7:
+        label = DQSLabel.ACCEPTABLE
+    elif dqs >= 0.5:
+        label = DQSLabel.DEGRADED
+    elif dqs >= 0.3:
+        label = DQSLabel.POOR
+    else:
+        label = DQSLabel.CRITICAL
+
+    return {
+        'dqs': round(dqs, 4),
+        'label': label.value,
+        'temporal_quality': round(temporal_quality, 4),
+        'value_quality': round(value_quality, 4),
+    }
+
 class PropositionGroup(Enum):
     BASIC_SAFETY = "basic_safety"
     LANE_COMPLIANCE = "lane_compliance"
@@ -2377,7 +2422,7 @@ class VehicleMonitorAnalyzer:
                         'states_analyzed': len(states),
                         'kripke_states': len(kripke.labelling_function()),
                         'statistics': statistics,
-                        # Human-comprehensible descriptions
+                        'dqs': compute_dqs(statistics),
                         'description': description_info,
                         'formula_description': formula_description,
                         'formula_type': prop_config.formula_type,
@@ -2393,6 +2438,7 @@ class VehicleMonitorAnalyzer:
                         'states_analyzed': 0,
                         'kripke_states': 0,
                         'statistics': statistics,
+                        'dqs': compute_dqs(statistics),
                         'description': description_info,
                         'formula_description': formula_description,
                         'formula_type': prop_config.formula_type,
@@ -2408,6 +2454,7 @@ class VehicleMonitorAnalyzer:
                     'status': 'ERROR',
                     'error': 'Unknown proposition type',
                     'statistics': {},
+                    'dqs': {'dqs': 0.0, 'label': DQSLabel.CRITICAL.value, 'temporal_quality': 0.0, 'value_quality': 0.0},
                     'description': {
                         'title': prop_name.replace('_', ' ').title(),
                         'description': f'Unknown proposition: {prop_name}',
@@ -2427,6 +2474,7 @@ class VehicleMonitorAnalyzer:
                     'status': 'ERROR',
                     'error': str(e),
                     'statistics': {},
+                    'dqs': {'dqs': 0.0, 'label': DQSLabel.CRITICAL.value, 'temporal_quality': 0.0, 'value_quality': 0.0},
                     'description': {
                         'title': prop_name.replace('_', ' ').title(),
                         'description': f'Error analyzing proposition: {prop_name}',
@@ -2442,14 +2490,35 @@ class VehicleMonitorAnalyzer:
         passed = sum(1 for r in results.values() if r.get('result') is True)
         failed = sum(1 for r in results.values() if r.get('result') is False)
         total = passed + failed
-        
+
+        prop_dqs_scores = [
+            r['dqs']['dqs']
+            for r in results.values()
+            if isinstance(r.get('dqs'), dict)
+        ]
+        aggregate_dqs = sum(prop_dqs_scores) / len(prop_dqs_scores) if prop_dqs_scores else 0.0
+        aggregate_dqs = round(aggregate_dqs, 4)
+
+        if aggregate_dqs >= 0.9:
+            aggregate_dqs_label = DQSLabel.GOOD.value
+        elif aggregate_dqs >= 0.7:
+            aggregate_dqs_label = DQSLabel.ACCEPTABLE.value
+        elif aggregate_dqs >= 0.5:
+            aggregate_dqs_label = DQSLabel.DEGRADED.value
+        elif aggregate_dqs >= 0.3:
+            aggregate_dqs_label = DQSLabel.POOR.value
+        else:
+            aggregate_dqs_label = DQSLabel.CRITICAL.value
+
         results['SUMMARY'] = {
             'total_propositions': len(enabled_propositions),
             'analyzed': total,
             'passed': passed,
             'failed': failed,
             'success_rate': passed / total if total > 0 else 0.0,
-            'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL'
+            'overall_result': 'PASS' if failed == 0 and passed > 0 else 'FAIL',
+            'dqs': aggregate_dqs,
+            'dqs_label': aggregate_dqs_label,
         }
     
         self._print_progress("State analysis completed")

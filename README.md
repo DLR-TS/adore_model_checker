@@ -138,7 +138,7 @@ vehicles:
         threshold: 30.0
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'vx'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -206,7 +206,7 @@ vehicles:
         threshold: 30.0
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: 'vx'
             transform_function: 'abs'
             cache_duration: 0.1
@@ -223,7 +223,7 @@ vehicles:
             field_path: ''
             cache_duration: 5.0
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
         evaluation_function: 'near_goal_evaluator'
@@ -234,7 +234,7 @@ vehicles:
         formula_type: 'always'
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
+            topic: '/ego_vehicle/vehicle_state_dynamic'
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
@@ -443,9 +443,9 @@ python3 adore_model_checker.py --mode online --config default.yaml --vehicle-id 
 Console Output:
 ```text
 Starting online monitoring for vehicle 0 for 5.0 seconds...
-ROS command: ros2 topic echo /ego_vehicle/vehicle_state/dynamic
-Subscription thread started for topic: /ego_vehicle/vehicle_state/dynamic
-Started process for /ego_vehicle/vehicle_state/dynamic (PID: 1464101)
+ROS command: ros2 topic echo /ego_vehicle/vehicle_state_dynamic
+Subscription thread started for topic: /ego_vehicle/vehicle_state_dynamic
+Started process for /ego_vehicle/vehicle_state_dynamic (PID: 1464101)
 ROS command: ros2 topic echo /ego_vehicle/route
 Subscription thread started for topic: /ego_vehicle/route
 Started process for /ego_vehicle/route (PID: 1464142)
