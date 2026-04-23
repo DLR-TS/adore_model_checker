@@ -164,6 +164,30 @@ class LogBroadcaster:
 log_broadcaster = LogBroadcaster()
 
 
+class _BroadcastLogHandler(logging.Handler):
+    """Routes Python logging records into the log broadcaster."""
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = 'stderr' if record.levelno >= logging.WARNING else 'stdout'
+            log_broadcaster.write(msg, stream)
+        except Exception:
+            pass
+
+
+def _install_log_handler():
+    handler = _BroadcastLogHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s',
+                                           datefmt='%H:%M:%S'))
+    root = logging.getLogger()
+    if not any(isinstance(h, _BroadcastLogHandler) for h in root.handlers):
+        root.addHandler(handler)
+
+
+_install_log_handler()
+
+
 class _TeeStream:
     """Wraps an existing stream, forwarding writes to both the original and the broadcaster."""
 
@@ -239,12 +263,31 @@ def _load_history_index():
 
 
 # ── App factory ──────────────────────────────────────────────────
+def _patch_history_dir(writable_path):
+    """Replace _history_dir in the installed model_checker module so
+    ContinuousMonitorEngine.__init__ never tries to create directories
+    inside the (read-only) package install tree."""
+    try:
+        import adore_model_checker.model_checker as _mc
+        os.makedirs(writable_path, exist_ok=True)
+        _mc._history_dir = lambda: writable_path
+    except Exception:
+        pass
+
+
 def create_app():
     app = Flask(__name__)
 
     get_model_check_blueprint, _ = setup_imports()
     blueprint = get_model_check_blueprint()
     app.register_blueprint(blueprint)
+
+    # Patch after registration so the api singleton is already initialised.
+    try:
+        from adore_model_checker.model_checker_api import _get_api
+        _patch_history_dir(_get_api().log_directory)
+    except Exception:
+        pass
 
     @app.after_request
     def add_cors(response):
@@ -289,32 +332,45 @@ def create_app():
 
     @app.route('/api/model_checker/continuous/violations/filtered')
     def filtered_violations():
-        disabled = _continuous_state['disabled_propositions']
-        with app.test_client() as c:
-            qs = request.query_string.decode()
-            resp = c.get(f'/api/model_check/continuous/violations?{qs}')
-            if resp.status_code != 200:
-                return resp.data, resp.status_code, {'Content-Type': resp.content_type}
-            body = resp.get_json()
-            if disabled and body and 'violations' in body:
-                body['violations'] = [
-                    v for v in body['violations']
-                    if v.get('proposition') not in disabled
-                ]
-            return jsonify(body)
+        try:
+            from adore_model_checker.model_checker_api import _get_api
+            api = _get_api()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
-    # Forward all other /api/model_checker/continuous/* requests to the blueprint.
-    # Registered after the two specific routes above so Flask matches those first.
+        if not api._continuous_engine:
+            return jsonify({'error': 'Continuous monitoring not initialized'}), 404
+
+        disabled = _continuous_state['disabled_propositions']
+        limit = request.args.get('limit', type=int)
+        proposition = request.args.get('proposition')
+        vehicle_id = request.args.get('vehicle_id', type=int)
+
+        violations = api._continuous_engine.get_violations(
+            limit=limit, proposition=proposition, vehicle_id=vehicle_id
+        )
+        if disabled:
+            violations = [v for v in violations if v.get('proposition') not in disabled]
+        return jsonify({'violations': violations, 'count': len(violations)})
+
+    # Forward /api/model_checker/continuous/* to the blueprint's view functions directly.
+    # This avoids duplicating ContinuousMonitorEngine construction and ensures
+    # the installed version's initialisation logic (which may differ from source)
+    # is always used. Called within the current request context — valid in Flask.
     @app.route('/api/model_checker/continuous/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])
     def proxy_continuous(subpath):
-        with app.test_client() as c:
-            target = f'/api/model_check/continuous/{subpath}'
-            if request.method == 'POST':
-                resp = c.post(target, json=request.get_json(silent=True) or {},
-                              query_string=request.query_string)
-            else:
-                resp = c.get(target, query_string=request.query_string)
-        return Response(resp.data, status=resp.status_code, content_type=resp.content_type)
+        from flask import current_app
+        # Map subpath to blueprint endpoint name, handling path parameters
+        parts = subpath.split('/')
+        base = parts[0]
+        endpoint = f'model_check_blueprint.continuous_{base}'
+        fn = current_app.view_functions.get(endpoint)
+        if fn is None:
+            return jsonify({'error': f'Unknown endpoint: /continuous/{subpath}'}), 404
+        try:
+            return fn(*parts[1:]) if len(parts) > 1 else fn()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     # ── Timed session endpoint ────────────────────────────────────
     @app.route('/api/model_checker/session/start', methods=['POST'])
@@ -387,9 +443,14 @@ def create_app():
 
     @app.route('/api/model_checker/result/<int:run_id>')
     def result_proxy(run_id):
-        with app.test_client() as c:
-            resp = c.get(f'/api/model_check/result/{run_id}')
-            return resp.data, resp.status_code, {'Content-Type': resp.content_type}
+        from flask import current_app
+        fn = current_app.view_functions.get('model_check_blueprint.get_result')
+        if fn is None:
+            return jsonify({'error': 'Result endpoint not available'}), 404
+        try:
+            return fn(run_id)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     # ── History endpoints ─────────────────────────────────────────
     @app.route('/api/model_checker/history')
@@ -498,7 +559,7 @@ def main():
         print("Available at:  http://localhost:5000")
         print("API endpoints: http://localhost:5000/api/model_check/")
         print("Dashboard:     http://localhost:5000/api/model_checker/dashboard")
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:

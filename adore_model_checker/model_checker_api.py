@@ -1239,6 +1239,11 @@ class ModelCheckAPI:
                     cm.window_size = int(data['window_size'])
                 if 'violation_log_file' in data:
                     cm.violation_log_file = data['violation_log_file']
+                else:
+                    # Always write violations into the same directory as run logs.
+                    cm.violation_log_file = os.path.join(
+                        self.log_directory, 'violations.jsonl'
+                    )
                 cm.enabled = True
 
                 self._continuous_engine = ContinuousMonitorEngine(config)
