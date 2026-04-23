@@ -1,317 +1,378 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ADORe Model Checker — Default Configuration
+#
+# Proposition flags
+# -----------------
+# enabled: true/false
+#   Master switch. When false the proposition is excluded from all model
+#   checking — batch runs, offline analysis, and continuous monitoring.
+#
+# continuous_monitoring_enabled: true/false
+#   Controls whether the proposition participates in continuous (live) monitoring
+#   sessions. The proposition must also have enabled: true for this to take
+#   effect. Setting this to false keeps the proposition available for batch and
+#   offline runs while excluding it from the continuous monitoring loop.
+# ─────────────────────────────────────────────────────────────────────────────
+
 monitoring:
-  monitoring_frequency: 10.0  # 10 Hz monitoring
-  buffer_size: 1000
-  log_level: 'INFO'
-  debug_mode: false
+  monitoring_frequency: 10.0  # Hz — how often the monitor samples incoming data
+  buffer_size: 1000            # maximum number of states held in the data buffer
+  log_level: INFO              # logging verbosity: DEBUG, INFO, WARNING, ERROR
+  debug_mode: false            # enable verbose internal diagnostics
 
 safety_parameters:
-  max_speed: 30.0  # m/s
-  safe_distance_lateral: 1.5  # meters lateral clearance
-  safe_distance_longitudinal: 2.0  # seconds following distance
-  
-  time_to_collision_threshold: 3.0  # seconds minimum TTC
-  emergency_brake_deceleration: -8.0  # m/s² max emergency braking
-  goal_reach_distance: 6.0  # meters to consider goal reached
-  
-  max_acceleration_rate: 2.0  # m/s² comfortable acceleration
-  max_deceleration_rate: -3.0  # m/s² comfortable braking
-  max_jerk: 1.0  # m/s³ comfort limit
-  
-  speed_limit_tolerance: 2.0  # m/s over limit tolerance
-  stop_line_tolerance: 0.3  # meters from stop line
-  
-  higher_speed_limit_tolerance: 4.0 # m/s higher over limit tolerance
-  speed_limit_tolerance_safety_score: 0.3 # lower bound of safety score for speed_limit_tolerance
-  higher_speed_limit_tolerance_safety_score: 0.15 # lower bound of safety score for higher_speed_limit_tolerance
-  speed_limit_tolerance_threshold: 0.5 # fraction of Total Test; number of times the speed_limit_tolerance can be exceeded in a test
-  higer_speed_limit_tolerance_threshold: 5 # total number of times the higher_speed_limit_tolerance can be exceeded in a test
-  speed_safety_score_threshold: 0.4 # below this average safety value the experiment fails
-  speed_safety_score_grade_format: 'both' # convert safety score to american, german or both grade scala
+  # ── Speed ──────────────────────────────────────────────────────────────────
+  max_speed: 30.0                             # m/s — absolute speed ceiling
+  speed_limit_tolerance: 2.0                  # m/s — allowable margin over the speed limit before a violation is raised
+  higher_speed_limit_tolerance: 4.0           # m/s — secondary wider tolerance used for graded scoring
+  speed_limit_tolerance_safety_score: 0.3     # minimum safety score before the speed_limit_tolerance band is considered exceeded
+  higher_speed_limit_tolerance_safety_score: 0.15  # minimum safety score for the higher tolerance band
+  speed_limit_tolerance_threshold: 0.5        # fraction of total test duration during which speed_limit_tolerance may be exceeded
+  higer_speed_limit_tolerance_threshold: 5    # absolute number of events at which the higher tolerance may be exceeded
+  speed_safety_score_threshold: 0.4           # average safety score below which the test fails
+  speed_safety_score_grade_format: both       # grade scale to report: american, german, or both
 
-  lower_lane_tolerance: 0.3 # m out of bounds of the lanes
-  lane_deviation_threshold: 0.5 # m out of bounds of the lanes; in compliance with the threshold
-  upper_lane_tolerance: 0.7 # m out of bounds of the lanes
-  lower_lane_tolerance_safety_score: 0.7 # lower bound of the safety score for lower_lane_tolerance
-  lane_tolerance_safety_score: 0.35 # lower bound of the safety score for lane_tolerance
-  upper_lane_tolerance_safety_score: 0.2 # lower bound of the safety score for upper_lane_tolerance
-  lane_tolerance_threshold: 0.5 # Fraction of Total Test; number of times the lane_tolerance can be exceeded in a test
-  upper_lane_tolerance_threshold: 3 # total number of times the upper_lane_tolerance can be exceeded in a test
-  lane_safety_score_threshold: 0.4 # below this average safety value the experiment fails
-  lane_safety_score_grade_format: 'both' # Convert safety score to american, german or both grade scala
+  # ── Following distance ─────────────────────────────────────────────────────
+  safe_distance_lateral: 1.5         # m — minimum lateral clearance
+  safe_distance_longitudinal: 2.0    # s — minimum time-gap to the vehicle ahead
 
-# ── Model checker logic selection ─────────────────────────────────────────────
-# Each proposition can specify logic_type to select the temporal logic used:
+  # ── Collision avoidance ────────────────────────────────────────────────────
+  time_to_collision_threshold: 3.0   # s — minimum acceptable time-to-collision
+  emergency_brake_deceleration: -8.0 # m/s² — maximum emergency braking force
+
+  # ── Goal ───────────────────────────────────────────────────────────────────
+  goal_reach_distance: 6.0           # m — distance to route endpoint at which the goal is considered reached
+
+  # ── Comfort / dynamics ─────────────────────────────────────────────────────
+  max_acceleration_rate: 2.0         # m/s² — comfortable acceleration ceiling
+  max_deceleration_rate: -3.0        # m/s² — comfortable braking ceiling
+  max_jerk: 1.0                      # m/s³ — jerk comfort limit
+  max_steering_rate: 45.0            # deg/s — maximum comfortable steering rate
+
+  # ── Lane keeping ───────────────────────────────────────────────────────────
+  lane_deviation_threshold: 0.5      # m — deviation from lane centre before a soft violation
+  lower_lane_tolerance: 0.3          # m — inner band of acceptable lane exceedance
+  upper_lane_tolerance: 0.7          # m — outer band of acceptable lane exceedance
+  lower_lane_tolerance_safety_score: 0.7   # minimum safety score for the inner band
+  lane_tolerance_safety_score: 0.35        # minimum safety score for the middle band
+  upper_lane_tolerance_safety_score: 0.2   # minimum safety score for the outer band
+  lane_tolerance_threshold: 0.5      # fraction of test during which the inner tolerance may be exceeded
+  upper_lane_tolerance_threshold: 3  # absolute event count before the outer tolerance is considered exceeded
+  lane_safety_score_threshold: 0.4   # average safety score below which the test fails
+  lane_safety_score_grade_format: both  # grade scale: american, german, or both
+
+  # ── Stop-line / intersection ────────────────────────────────────────────────
+  stop_line_tolerance: 0.3           # m — acceptable overshoot of a stop line
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Continuous monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+continuous_monitoring:
+  enabled: false            # set to true to start continuous monitoring automatically on startup
+  interval_seconds: 30.0    # seconds between successive monitoring windows
+  window_size: 300          # number of states included in each monitoring window
+  max_violations: 10000     # maximum violations held in memory before the oldest are dropped
+  log_violations: true      # write violations to violation_log_file in addition to memory
+  violation_log_file: violations.jsonl  # path to the JSONL violation log
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logic type reference
+# ─────────────────────────────────────────────────────────────────────────────
+# Each proposition specifies logic_type to select the temporal logic engine:
 #
-#   logic_type: ctls   (default) CTL* — the original behaviour.
-#                       formula_type shortcuts: always, eventually, never,
-#                       next, until, weak_until, eventually_always
+#   ctls   CTL* — branching-time logic supporting all path quantifiers and
+#                 temporal operators. formula_type shortcuts: always,
+#                 eventually, never, next, until, weak_until, eventually_always.
 #
-#   logic_type: ctl    CTL proper — adds exists_eventually / exists_always /
-#                       exists_next shortcuts (EF/EG/EX).
+#   ctl    CTL proper — adds exists_eventually / exists_always / exists_next
+#                 shortcuts (EF / EG / EX).
 #
-#   logic_type: ltl    LTL — uses pyModelChecking's automaton-based LTL checker.
-#                       ltl_formula: "G {p}"  overrides formula_type.
-#                       Supported operators: G, F, X, !, U, R, W, &, |
-#                       Example:  ltl_formula: "G (F {p})"
-# ──────────────────────────────────────────────────────────────────────────────
+#   ltl    LTL — automaton-based linear-time logic checker.
+#                 Set ltl_formula: "G {p}" to override formula_type.
+#                 Supported operators: G, F, X, !, U, R, W, &, |
+#                 Example: ltl_formula: "G (F {p})"
+# ─────────────────────────────────────────────────────────────────────────────
+
 vehicles:
   - id: 0
     proposition_groups:
       basic_safety:
         enabled: true
-        description: "Core safety propositions - speed, collision avoidance, goal reaching"
-      
+        description: Core safety propositions — speed, collision avoidance, goal reaching
+
       dynamic_safety:
         enabled: true
-        description: "Dynamic collision avoidance and emergency response"
-      
+        description: Dynamic collision avoidance and emergency response
+
       traffic_rules:
         enabled: false
-        description: "Traffic law compliance monitoring"
+        description: Traffic law compliance monitoring
 
     propositions:
-      # BASIC SAFETY CHECKS
+
+      # ── Basic safety ───────────────────────────────────────────────────────
+
       EGO_SPEED:
         enabled: true
-        atomic_prop: 'speed_safe'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 13.89  # Max speed m/s (50 kph for German residential streets)
+        continuous_monitoring_enabled: true
+        atomic_prop: speed_safe
+        formula_type: always
+        logic_type: ctls
+        threshold: 13.89  # m/s — maximum permitted speed (50 km/h)
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'vx'
-            transform_function: 'abs'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: vx
+            transform_function: abs
             cache_duration: 0.1
-        evaluation_function: 'speed_limit_evaluator'
+        evaluation_function: speed_limit_evaluator
 
       NEAR_GOAL:
         enabled: true
-        atomic_prop: 'goal_reached'
-        formula_type: 'eventually'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 5.0
+        continuous_monitoring_enabled: false  # goal-reach is meaningful over a complete run, not individual monitoring windows
+        atomic_prop: goal_reached
+        formula_type: eventually
+        logic_type: ctls
+        threshold: 6.0  # m — distance to route endpoint at which goal is considered reached
         data_sources:
           route:
-            topic: '/ego_vehicle/route'
-            field_path: ''  
+            topic: /ego_vehicle/route
+            field_path: ''
             cache_duration: 5.0
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: ''  
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: ''
             cache_duration: 0.1
-        evaluation_function: 'near_goal_evaluator'
+        evaluation_function: near_goal_evaluator
 
       DECELERATION:
         enabled: false
-        atomic_prop: 'deceleration_safe'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: -6.0  # Maximum safe deceleration in m/s² (negative value)
+        continuous_monitoring_enabled: true
+        atomic_prop: deceleration_safe
+        formula_type: always
+        logic_type: ctls
+        threshold: -6.0  # m/s² — maximum safe deceleration (negative value)
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'ax'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: ax
             cache_duration: 0.1
           brake_status:
-            topic: '/ego_vehicle/brake_status'
-            field_path: 'active'
+            topic: /ego_vehicle/brake_status
+            field_path: active
             cache_duration: 0.1
-        evaluation_function: 'deceleration_evaluator'
+        evaluation_function: deceleration_evaluator
 
-      # CONTROL COMPLIANCE CHECKS
+      # ── Control compliance ─────────────────────────────────────────────────
+
       ACCELERATION_COMPLIANCE:
         enabled: true
-        atomic_prop: 'acceleration_compliant'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 1.5  # Maximum allowed error in m/s² for acceleration
+        continuous_monitoring_enabled: true
+        atomic_prop: acceleration_compliant
+        formula_type: always
+        logic_type: ctls
+        threshold: 1.5  # m/s² — maximum permitted error between commanded and measured acceleration
         data_sources:
           measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'ax'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: ax
             cache_duration: 0.1
           commanded_acceleration:
-            topic: '/ego_vehicle/next_vehicle_command'
-            field_path: 'acceleration'
+            topic: /ego_vehicle/next_vehicle_command
+            field_path: acceleration
             cache_duration: 0.1
-        evaluation_function: 'acceleration_compliance_evaluator'
+        evaluation_function: acceleration_compliance_evaluator
 
       DECELERATION_COMPLIANCE:
         enabled: true
-        atomic_prop: 'deceleration_compliant'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 2.0  # Maximum allowed error in m/s² for deceleration
+        continuous_monitoring_enabled: true
+        atomic_prop: deceleration_compliant
+        formula_type: always
+        logic_type: ctls
+        threshold: 2.0  # m/s² — maximum permitted error between commanded and measured deceleration
         data_sources:
           measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'ax'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: ax
             cache_duration: 0.1
           commanded_acceleration:
-            topic: '/ego_vehicle/next_vehicle_command'
-            field_path: 'acceleration'
+            topic: /ego_vehicle/next_vehicle_command
+            field_path: acceleration
             cache_duration: 0.1
-        evaluation_function: 'deceleration_compliance_evaluator'
-  
+        evaluation_function: deceleration_compliance_evaluator
+
+      # ── Spatial safety ─────────────────────────────────────────────────────
+
       SAFE_DISTANCE_X:
         enabled: false
-        atomic_prop: 'longitudinal_safe'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
+        continuous_monitoring_enabled: true
+        atomic_prop: longitudinal_safe
+        formula_type: always
+        logic_type: ctls
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
-            topic: '/ego_vehicle/traffic_participants'
-            field_path: 'data'
+            topic: /ego_vehicle/traffic_participants
+            field_path: data
             cache_duration: 0.1
-        evaluation_function: 'longitudinal_safety_evaluator'
+        evaluation_function: longitudinal_safety_evaluator
 
       SAFE_DISTANCE_Y:
         enabled: false
-        atomic_prop: 'lateral_safe'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
+        continuous_monitoring_enabled: true
+        atomic_prop: lateral_safe
+        formula_type: always
+        logic_type: ctls
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
-            topic: '/ego_vehicle/traffic_participants'
-            field_path: 'data'
+            topic: /ego_vehicle/traffic_participants
+            field_path: data
             cache_duration: 0.1
-        evaluation_function: 'lateral_safety_evaluator'
+        evaluation_function: lateral_safety_evaluator
 
       LANE_KEEPING:
         enabled: true
-        atomic_prop: 'lanekeeping'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 0.5
+        continuous_monitoring_enabled: true
+        atomic_prop: lanekeeping
+        formula_type: always
+        logic_type: ctls
+        threshold: 0.5  # m — maximum lateral deviation from lane centre
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           lane_info:
-            topic: '/ego_vehicle/local_map'
+            topic: /ego_vehicle/local_map
             field_path: ''
             cache_duration: 1.0
-        evaluation_function: 'lanekeeping_safety_evaluator'
+        evaluation_function: lanekeeping_safety_evaluator
 
-      # DYNAMIC SAFETY CHECKS (DISABLED FOR NOW)
+      # ── Dynamic safety ─────────────────────────────────────────────────────
+
       TIME_TO_COLLISION:
         enabled: false
-        atomic_prop: 'ttc_safe'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 3.0  # Minimum TTC in seconds
+        continuous_monitoring_enabled: true
+        atomic_prop: ttc_safe
+        formula_type: always
+        logic_type: ctls
+        threshold: 3.0  # s — minimum acceptable time-to-collision
         data_sources:
           ego_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           traffic_participants:
-            topic: '/ego_vehicle/traffic_participants'
-            field_path: 'data'
+            topic: /ego_vehicle/traffic_participants
+            field_path: data
             cache_duration: 0.1
-        evaluation_function: 'time_to_collision_evaluator'
+        evaluation_function: time_to_collision_evaluator
 
       EMERGENCY_BRAKING:
         enabled: false
-        atomic_prop: 'emergency_brake_available'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: -8.0  # Max emergency deceleration
+        continuous_monitoring_enabled: true
+        atomic_prop: emergency_brake_available
+        formula_type: always
+        logic_type: ctls
+        threshold: -8.0  # m/s² — maximum emergency deceleration
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           brake_system:
-            topic: '/ego_vehicle/brake_status'
+            topic: /ego_vehicle/brake_status
             field_path: ''
             cache_duration: 0.1
-        evaluation_function: 'emergency_brake_evaluator'
+        evaluation_function: emergency_brake_evaluator
 
       SMOOTH_ACCELERATION:
         enabled: false
-        atomic_prop: 'acceleration_smooth'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 2.0  # Max comfortable acceleration
+        continuous_monitoring_enabled: true
+        atomic_prop: acceleration_smooth
+        formula_type: always
+        logic_type: ctls
+        threshold: 2.0  # m/s² — maximum comfortable acceleration
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'ax'
-            transform_function: 'abs'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: ax
+            transform_function: abs
             cache_duration: 0.1
-        evaluation_function: 'smooth_acceleration_evaluator'
+        evaluation_function: smooth_acceleration_evaluator
 
       SMOOTH_STEERING:
         enabled: true
-        atomic_prop: 'steering_smooth'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
-        threshold: 45.0  # Max comfortable steering rate
+        continuous_monitoring_enabled: true
+        atomic_prop: steering_smooth
+        formula_type: always
+        logic_type: ctls
+        threshold: 45.0  # deg/s — maximum comfortable steering rate
         data_sources:
           steering_rate:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'steering_rate'
-            transform_function: 'abs'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: steering_rate
+            transform_function: abs
             cache_duration: 0.1
-        evaluation_function: 'smooth_steering_evaluator'
+        evaluation_function: smooth_steering_evaluator
 
-      # TRAFFIC COMPLIANCE CHECKS (ALL DISABLED)
+      # ── Traffic compliance (all disabled by default) ───────────────────────
+
       SPEED_LIMIT_COMPLIANCE:
         enabled: false
-        atomic_prop: 'speed_legal'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
+        continuous_monitoring_enabled: true
+        atomic_prop: speed_legal
+        formula_type: always
+        logic_type: ctls
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
-            field_path: 'vx'
-            transform_function: 'abs'
+            topic: /ego_vehicle/vehicle_state_dynamic
+            field_path: vx
+            transform_function: abs
             cache_duration: 0.1
           speed_limit:
-            topic: '/ego_vehicle/speed_limit'
-            field_path: 'limit'
+            topic: /ego_vehicle/speed_limit
+            field_path: limit
             cache_duration: 1.0
-        evaluation_function: 'speed_limit_compliance_evaluator'
+        evaluation_function: speed_limit_compliance_evaluator
 
       TRAFFIC_LIGHT_COMPLIANCE:
         enabled: false
-        atomic_prop: 'traffic_light_compliant'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
+        continuous_monitoring_enabled: true
+        atomic_prop: traffic_light_compliant
+        formula_type: always
+        logic_type: ctls
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           traffic_light:
-            topic: '/ego_vehicle/traffic_light_status'
+            topic: /ego_vehicle/traffic_light_status
             field_path: ''
             cache_duration: 0.1
-        evaluation_function: 'traffic_light_compliance_evaluator'
+        evaluation_function: traffic_light_compliance_evaluator
 
       STOP_SIGN_COMPLIANCE:
         enabled: false
-        atomic_prop: 'stop_sign_compliant'
-        formula_type: 'always'
-        logic_type: ctls       # ctls (default/CTL*), ctl, or ltl
+        continuous_monitoring_enabled: true
+        atomic_prop: stop_sign_compliant
+        formula_type: always
+        logic_type: ctls
         data_sources:
           vehicle_state:
-            topic: '/ego_vehicle/vehicle_state_dynamic'
+            topic: /ego_vehicle/vehicle_state_dynamic
             field_path: ''
             cache_duration: 0.1
           stop_sign:
-            topic: '/ego_vehicle/stop_sign_status'
+            topic: /ego_vehicle/stop_sign_status
             field_path: ''
             cache_duration: 0.1
-        evaluation_function: 'stop_sign_compliance_evaluator'
+        evaluation_function: stop_sign_compliance_evaluator

@@ -54,6 +54,21 @@ from pyModelChecking.CTLS import (
 
 ROSMessageImporter.import_all_messages()
 
+# ── History store ────────────────────────────────────────────────
+def _history_dir():
+    candidates = [
+        os.environ.get('ADORE_HISTORY_DIR'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'history'),
+    ]
+    for path in candidates:
+        if path:
+            os.makedirs(path, exist_ok=True)
+            return path
+    raise RuntimeError("Cannot determine history directory")
+
+
+
+
 class MonitoringMode(Enum):
     OFFLINE = "offline"
     ONLINE = "online"
@@ -390,6 +405,7 @@ class DataSourceConfig:
 @dataclass
 class PropositionConfig:
     enabled: bool = True
+    continuous_monitoring_enabled: bool = True
     atomic_prop: str = "p"
     formula_type: str = "always"
     logic_type: str = "ctl"
@@ -852,6 +868,32 @@ class OnlineMonitor:
                 logging.warning(f"Unknown proposition type: {prop_name}")
                 continue
         
+        return enabled_propositions
+
+    def _get_continuous_enabled_propositions(self) -> Dict[str, PropositionConfig]:
+        """Return propositions that are both globally enabled and enabled for continuous monitoring."""
+        enabled_propositions = {}
+
+        for prop_name, prop_config in self.vehicle_config.propositions.items():
+            if not prop_config.enabled:
+                continue
+            if not prop_config.continuous_monitoring_enabled:
+                continue
+
+            try:
+                prop_type = PropositionType[prop_name]
+                group_name = prop_type.group.value
+
+                group_config = self.vehicle_config.proposition_groups.get(group_name)
+                if group_config and not group_config.enabled:
+                    continue
+
+                enabled_propositions[prop_name] = prop_config
+
+            except KeyError:
+                logging.warning(f"Unknown proposition type: {prop_name}")
+                continue
+
         return enabled_propositions
 
     def _create_topic_callback(self, topic: str) -> Callable:
@@ -2799,7 +2841,8 @@ class ContinuousMonitorEngine:
         self._analyzers: Dict[int, VehicleMonitorAnalyzer] = {}
 
         if self.cm_config.log_violations:
-            log_dir = os.path.dirname(self.cm_config.violation_log_file) or '.'
+            hdir = _history_dir()
+            log_dir = os.path.dirname(os.path.join(hdir, self.cm_config.violation_log_file)) or '.'
             os.makedirs(log_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -2921,7 +2964,17 @@ class ContinuousMonitorEngine:
             if not states:
                 continue
 
-            results = analyzer._analyze_states(states, vehicle_config)
+            # Build a filtered vehicle config containing only propositions that
+            # are both globally enabled and enabled for continuous monitoring.
+            continuous_props = {
+                name: cfg
+                for name, cfg in vehicle_config.propositions.items()
+                if cfg.enabled and cfg.continuous_monitoring_enabled
+            }
+            filtered_vehicle_config = copy.copy(vehicle_config)
+            filtered_vehicle_config.propositions = continuous_props
+
+            results = analyzer._analyze_states(states, filtered_vehicle_config)
 
             with self._lock:
                 self._stats['windows_checked'] += 1
@@ -2961,7 +3014,8 @@ class ContinuousMonitorEngine:
 
         if self.cm_config.log_violations:
             try:
-                with open(self.cm_config.violation_log_file, 'a') as fh:
+                hdir = _history_dir()
+                with open(os.path.join(hdir, self.com_config.violation_log_file), 'a') as fh:
                     import json as _json
                     fh.write(_json.dumps(violation.to_dict()) + '\n')
             except Exception as e:

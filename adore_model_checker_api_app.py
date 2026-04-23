@@ -65,159 +65,44 @@ def _config_dir():
 
 
 def _seed_default_config(config_dir):
-    """Copy or write default.yaml, ensuring NEAR_GOAL is disabled."""
+    """Copy the canonical package default.yaml into config_dir if not already present."""
     dest = os.path.join(config_dir, 'default.yaml')
     if os.path.exists(dest):
-        _patch_near_goal(dest)
         return
 
-    here = os.path.dirname(os.path.abspath(__file__))
-    search = [
-        os.path.join(here, 'default.yaml'),
-        os.path.join(here, '..', 'config', 'default.yaml'),
-        os.path.join(here, 'config', 'default.yaml'),
-    ]
-    for src in search:
-        if os.path.exists(src):
-            import shutil
-            shutil.copy2(src, dest)
-            _patch_near_goal(dest)
-            return
+    content = _load_package_default_yaml()
+    if content:
+        with open(dest, 'w') as f:
+            f.write(content)
+        return
 
-    with open(dest, 'w') as f:
-        f.write(_DEFAULT_YAML)
+    raise RuntimeError(
+        "Cannot locate adore_model_checker/config/default.yaml — "
+        "ensure the package is installed correctly."
+    )
 
 
-def _patch_near_goal(path):
-    """Ensure NEAR_GOAL.enabled is false in an existing config file."""
+def _load_package_default_yaml():
+    """Return the canonical default.yaml content from the package, or None on failure."""
     try:
-        import yaml
-        with open(path) as f:
-            cfg = yaml.safe_load(f)
-        patched = False
-        for vehicle in (cfg or {}).get('vehicles', []):
-            props = vehicle.get('propositions', {})
-            if isinstance(props, dict) and 'NEAR_GOAL' in props:
-                if props['NEAR_GOAL'].get('enabled', True):
-                    props['NEAR_GOAL']['enabled'] = False
-                    patched = True
-        if patched:
-            with open(path, 'w') as f:
-                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+        from importlib.resources import files
+        resource = files('adore_model_checker').joinpath('config/default.yaml')
+        if resource.is_file():
+            return resource.read_text(encoding='utf-8')
     except Exception:
         pass
 
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in [
+        os.path.join(here, 'adore_model_checker', 'config', 'default.yaml'),
+        os.path.join(here, 'config', 'default.yaml'),
+    ]:
+        if os.path.exists(candidate):
+            with open(candidate, 'r') as f:
+                return f.read()
 
-_DEFAULT_YAML = """\
-# ADORe Model Checker — default configuration
-# Each proposition supports an 'enabled' flag for continuous monitoring.
-# Set enabled: false to exclude a proposition from continuous checks.
+    return None
 
-monitoring:
-  monitoring_frequency: 10.0
-  buffer_size: 1000
-  log_level: INFO
-  debug_mode: false
-
-safety_parameters:
-  max_speed: 30.0
-  goal_reach_distance: 5.0
-  time_to_collision_threshold: 3.0
-  emergency_brake_deceleration: -8.0
-  max_acceleration_rate: 2.0
-  max_deceleration_rate: -3.0
-  max_steering_rate: 45.0
-
-continuous_monitoring:
-  enabled: false
-  interval_seconds: 30.0
-  window_size: 300
-
-vehicles:
-  - id: 0
-    proposition_groups:
-      basic_safety:
-        enabled: true
-        description: Core safety propositions
-
-    propositions:
-      EGO_SPEED:
-        enabled: true
-        atomic_prop: speed_safe
-        formula_type: always
-        threshold: 13.89
-        data_sources:
-          vehicle_state:
-            topic: /ego_vehicle/vehicle_state/dynamic
-            field_path: vx
-            transform_function: abs
-            cache_duration: 0.1
-        evaluation_function: speed_limit_evaluator
-
-      NEAR_GOAL:
-        enabled: false
-        atomic_prop: goal_reached
-        formula_type: eventually
-        threshold: 5.0
-        data_sources:
-          route:
-            topic: /ego_vehicle/route
-            field_path: ''
-            cache_duration: 5.0
-          vehicle_state:
-            topic: /ego_vehicle/vehicle_state/dynamic
-            field_path: ''
-            cache_duration: 0.1
-        evaluation_function: near_goal_evaluator
-
-      DECELERATION:
-        enabled: true
-        atomic_prop: deceleration_safe
-        formula_type: always
-        threshold: -6.0
-        data_sources:
-          vehicle_state:
-            topic: /ego_vehicle/vehicle_state/dynamic
-            field_path: ax
-            cache_duration: 0.1
-          brake_status:
-            topic: /ego_vehicle/brake_status
-            field_path: active
-            cache_duration: 0.1
-        evaluation_function: deceleration_evaluator
-
-      ACCELERATION_COMPLIANCE:
-        enabled: true
-        atomic_prop: acceleration_compliant
-        formula_type: always
-        threshold: 1.5
-        data_sources:
-          measured_acceleration:
-            topic: /ego_vehicle/vehicle_state/dynamic
-            field_path: ax
-            cache_duration: 0.1
-          commanded_acceleration:
-            topic: /ego_vehicle/next_vehicle_command
-            field_path: acceleration
-            cache_duration: 0.1
-        evaluation_function: acceleration_compliance_evaluator
-
-      DECELERATION_COMPLIANCE:
-        enabled: true
-        atomic_prop: deceleration_compliant
-        formula_type: always
-        threshold: 2.0
-        data_sources:
-          measured_acceleration:
-            topic: /ego_vehicle/vehicle_state/dynamic
-            field_path: ax
-            cache_duration: 0.1
-          commanded_acceleration:
-            topic: /ego_vehicle/next_vehicle_command
-            field_path: acceleration
-            cache_duration: 0.1
-        evaluation_function: deceleration_compliance_evaluator
-"""
 
 
 def _safe_config_name(name):

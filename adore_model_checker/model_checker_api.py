@@ -246,116 +246,35 @@ class ConfigResolver:
     
     @staticmethod
     def create_default_config(config_path):
-        """Create a default config file if it doesn't exist"""
-        default_config = """monitoring:
-  monitoring_frequency: 10.0
-  buffer_size: 1000
-  log_level: 'INFO'
-  debug_mode: false
-
-safety_parameters:
-  max_speed: 30.0
-  safe_distance_lateral: 1.5
-  safe_distance_longitudinal: 2.0
-  time_to_collision_threshold: 3.0
-  emergency_brake_deceleration: -8.0
-  goal_reach_distance: 5.0
-  max_acceleration_rate: 2.0
-  max_deceleration_rate: -3.0
-  max_jerk: 1.0
-  speed_limit_tolerance: 2.0
-  stop_line_tolerance: 0.3
-
-vehicles:
-  - id: 0
-    proposition_groups:
-      basic_safety:
-        enabled: true
-        description: "Core safety propositions - speed, collision avoidance, goal reaching"
-
-    propositions:
-      EGO_SPEED:
-        enabled: true
-        atomic_prop: 'speed_safe'
-        formula_type: 'always'
-        threshold: 13.89
-        data_sources:
-          vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
-            field_path: 'vx'
-            transform_function: 'abs'
-            cache_duration: 0.1
-        evaluation_function: 'speed_limit_evaluator'
-
-      NEAR_GOAL:
-        enabled: true
-        atomic_prop: 'goal_reached'
-        formula_type: 'eventually'
-        threshold: 5.0
-        data_sources:
-          route:
-            topic: '/ego_vehicle/route'
-            field_path: ''
-            cache_duration: 5.0
-          vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
-            field_path: ''
-            cache_duration: 0.1
-        evaluation_function: 'near_goal_evaluator'
-
-      DECELERATION:
-        enabled: true
-        atomic_prop: 'deceleration_safe'
-        formula_type: 'always'
-        threshold: -6.0
-        data_sources:
-          vehicle_state:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
-            field_path: 'ax'
-            cache_duration: 0.1
-          brake_status:
-            topic: '/ego_vehicle/brake_status'
-            field_path: 'active'
-            cache_duration: 0.1
-        evaluation_function: 'deceleration_evaluator'
-
-      ACCELERATION_COMPLIANCE:
-        enabled: true
-        atomic_prop: 'acceleration_compliant'
-        formula_type: 'always'
-        threshold: 1.5
-        data_sources:
-          measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
-            field_path: 'ax'
-            cache_duration: 0.1
-          commanded_acceleration:
-            topic: '/ego_vehicle/next_vehicle_command'
-            field_path: 'acceleration'
-            cache_duration: 0.1
-        evaluation_function: 'acceleration_compliance_evaluator'
-
-      DECELERATION_COMPLIANCE:
-        enabled: true
-        atomic_prop: 'deceleration_compliant'
-        formula_type: 'always'
-        threshold: 2.0
-        data_sources:
-          measured_acceleration:
-            topic: '/ego_vehicle/vehicle_state/dynamic'
-            field_path: 'ax'
-            cache_duration: 0.1
-          commanded_acceleration:
-            topic: '/ego_vehicle/next_vehicle_command'
-            field_path: 'acceleration'
-            cache_duration: 0.1
-        evaluation_function: 'deceleration_compliance_evaluator'
-"""
-        
+        """Create a default config file by copying the canonical package default."""
         try:
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(config_path)), exist_ok=True)
+
+            # Read the canonical default from the package data.
+            package_default = None
+            try:
+                from importlib.resources import files
+                resource = files('adore_model_checker').joinpath('config/default.yaml')
+                if resource.is_file():
+                    package_default = resource.read_text(encoding='utf-8')
+            except Exception:
+                pass
+
+            if package_default is None:
+                # Filesystem fallback for development / editable installs.
+                here = os.path.dirname(os.path.abspath(__file__))
+                candidate = os.path.join(here, 'config', 'default.yaml')
+                if os.path.exists(candidate):
+                    with open(candidate, 'r') as fh:
+                        package_default = fh.read()
+
+            if package_default is None:
+                raise FileNotFoundError(
+                    "Cannot locate adore_model_checker/config/default.yaml in the package."
+                )
+
             with open(config_path, 'w') as f:
-                f.write(default_config)
+                f.write(package_default)
             logger.info(f"Created default config file at: {config_path}")
         except (PermissionError, OSError) as e:
             logger.error(f"Could not create default config at {config_path}: {e}")
