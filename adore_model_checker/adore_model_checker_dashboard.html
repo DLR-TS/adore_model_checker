@@ -1,0 +1,2363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADORe Model Checker — Monitor</title>
+<style>
+  :root {
+    --bg:        #0a0c10;
+    --surface:   #10141c;
+    --border:    #1e2535;
+    --muted:     #2a3345;
+    --text:      #c8d6f0;
+    --dim:       #5a6a88;
+    --accent:    #3b82f6;
+    --accent2:   #06b6d4;
+    --ok:        #22c55e;
+    --warn:      #f59e0b;
+    --danger:    #ef4444;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-ui:   'IBM Plex Sans', 'DM Sans', system-ui, sans-serif;
+    --radius:    6px;
+    --transition: 160ms cubic-bezier(.4,0,.2,1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  #adore-monitor {
+    display: grid;
+    grid-template-rows: 52px 40px 1fr;
+    height: 100vh;
+    min-height: 600px;
+  }
+
+  #adore-monitor.embedded {
+    height: auto;
+    min-height: 0;
+  }
+
+  /* ── Topbar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .topbar-logo {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .topbar-logo span { color: var(--dim); }
+
+  .topbar-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  .pulse {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--dim);
+    flex-shrink: 0;
+    transition: background var(--transition);
+  }
+  .pulse.active { background: var(--ok); animation: beat 1.4s ease-in-out infinite; }
+  .pulse.error  { background: var(--danger); }
+
+  @keyframes beat {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: .35; }
+  }
+
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .api-input {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 8px;
+    width: 220px;
+    outline: none;
+    transition: border-color var(--transition);
+  }
+  .api-input:focus { border-color: var(--accent); }
+
+  /* ── Tab nav ── */
+  .tab-nav {
+    display: flex;
+    align-items: stretch;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+
+  .tab-nav::-webkit-scrollbar { height: 0; }
+
+  .tab-btn {
+    padding: 0 18px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color var(--transition), border-color var(--transition);
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    cursor: pointer;
+    transition: background var(--transition), opacity var(--transition);
+    white-space: nowrap;
+  }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:not(:disabled):hover { background: #2563eb; }
+
+  .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+  .btn-danger:not(:disabled):hover { background: rgba(239,68,68,.12); }
+
+  .btn-ghost { background: transparent; border-color: var(--border); color: var(--dim); }
+  .btn-ghost:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-ok { background: transparent; border-color: var(--ok); color: var(--ok); }
+  .btn-ok:not(:disabled):hover { background: rgba(34,197,94,.12); }
+
+  .btn-warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+  .btn-warn:not(:disabled):hover { background: rgba(245,158,11,.12); }
+
+  /* ── Tab panels ── */
+  .tab-panel { display: none; height: 100%; overflow: hidden; }
+  .tab-panel.active { display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Monitor tab (original layout) ── */
+  .body {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+
+  .sidebar-section { padding: 0 14px 10px; }
+
+  .sidebar-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 8px;
+    padding-top: 4px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-row:last-child { border-bottom: none; }
+
+  .stat-key { color: var(--dim); font-size: 11px; }
+
+  .stat-val {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .stat-val.ok     { color: var(--ok); }
+  .stat-val.warn   { color: var(--warn); }
+  .stat-val.danger { color: var(--danger); }
+
+  .main {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+
+  .metrics-strip {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .metric-card {
+    flex: 1;
+    background: var(--surface);
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .metric-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .metric-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text);
+    transition: color var(--transition);
+  }
+  .metric-value.ok     { color: var(--ok); }
+  .metric-value.danger { color: var(--danger); }
+  .metric-value.warn   { color: var(--warn); }
+
+  .metric-sub { font-size: 10px; color: var(--dim); }
+
+  .lower {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    overflow: hidden;
+  }
+
+  .chart-panel {
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .panel-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 10px;
+  }
+
+  .bar-chart { display: flex; flex-direction: column; gap: 6px; }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bar-name {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bar-track {
+    height: 6px;
+    background: var(--muted);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width .4s ease;
+  }
+  .bar-fill.high { background: var(--danger); }
+  .bar-fill.med  { background: var(--warn); }
+
+  .bar-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text);
+    text-align: right;
+  }
+
+  .sparkline-wrap { width: 100%; height: 60px; position: relative; }
+  canvas.sparkline { width: 100%; height: 100%; }
+
+  .feed-panel {
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .feed-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .feed-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--muted);
+    color: var(--text);
+    padding: 1px 7px;
+    border-radius: 10px;
+  }
+
+  .feed-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feed-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background var(--transition);
+    animation: slide-in .2s ease;
+  }
+  .feed-item:hover { background: var(--muted); }
+
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .feed-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .feed-prop {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--danger);
+  }
+
+  .feed-time {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--dim);
+  }
+
+  .feed-group { font-size: 10px; color: var(--dim); }
+
+  .feed-desc {
+    font-size: 10px;
+    color: var(--text);
+    opacity: .7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    margin-right: 4px;
+  }
+  .tag.ltl { border-color: var(--accent2); color: var(--accent2); }
+  .tag.ctl { border-color: var(--accent);  color: var(--accent); }
+
+  /* ── Drawer ── */
+  .drawer {
+    position: fixed;
+    inset: 0;
+    display: none;
+    z-index: 100;
+  }
+  .drawer.open { display: flex; }
+
+  .drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,.55);
+  }
+
+  .drawer-panel {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 460px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateX(100%);
+    transition: transform .22s cubic-bezier(.4,0,.2,1);
+  }
+  .drawer.open .drawer-panel { transform: translateX(0); }
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .drawer-title {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--danger);
+  }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .detail-section { display: flex; flex-direction: column; gap: 6px; }
+
+  .detail-key {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .detail-val {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    word-break: break-all;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .stats-cell {
+    background: var(--muted);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+  }
+
+  .stats-cell-key { font-size: 9px; color: var(--dim); margin-bottom: 2px; }
+
+  .stats-cell-val {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .empty-icon { font-size: 28px; opacity: .3; }
+
+  /* ── Run Session tab ── */
+  .run-layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .run-config-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .form-section { display: flex; flex-direction: column; gap: 8px; }
+
+  .form-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .form-input {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+    width: 100%;
+    transition: border-color var(--transition);
+  }
+  .form-input:focus { border-color: var(--accent); }
+
+  .form-input[type="number"] { -moz-appearance: textfield; }
+  .form-input[type="number"]::-webkit-inner-spin-button { display: none; }
+
+  .form-select {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    outline: none;
+    width: 100%;
+    cursor: pointer;
+  }
+  .form-select:focus { border-color: var(--accent); }
+
+  .run-result-panel {
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .run-progress {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: none;
+  }
+  .run-progress.visible { display: flex; flex-direction: column; gap: 10px; }
+
+  .progress-bar-wrap {
+    height: 4px;
+    background: var(--muted);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width .3s ease;
+    width: 0%;
+  }
+  .progress-bar-fill.indeterminate {
+    width: 40% !important;
+    animation: progress-sweep 1.2s ease-in-out infinite;
+  }
+
+  @keyframes progress-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+
+  .progress-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  .progress-timer {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .result-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .result-card-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .result-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 3px;
+  }
+  .result-badge.pass { background: rgba(34,197,94,.15); color: var(--ok); border: 1px solid rgba(34,197,94,.3); }
+  .result-badge.fail { background: rgba(239,68,68,.15); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+  .result-badge.running { background: rgba(59,130,246,.15); color: var(--accent); border: 1px solid rgba(59,130,246,.3); }
+
+  .result-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .result-table th {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 8px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .result-table td {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .result-table tr:last-child td { border-bottom: none; }
+
+  .result-table td.pass { color: var(--ok); font-weight: 700; }
+  .result-table td.fail { color: var(--danger); font-weight: 700; }
+
+  /* ── History tab ── */
+  .history-layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .history-list-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .history-list-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .history-list-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .history-items {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .history-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background var(--transition);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .history-item:hover { background: var(--muted); }
+  .history-item.selected { background: rgba(59,130,246,.1); border-left: 2px solid var(--accent); }
+
+  .history-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .history-item-id {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .history-item-time {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--dim);
+  }
+
+  .history-item-config {
+    font-size: 10px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .history-detail-panel {
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .history-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .view-toggle {
+    display: flex;
+    background: var(--muted);
+    border-radius: var(--radius);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .view-toggle-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition), color var(--transition);
+  }
+  .view-toggle-btn.active { background: var(--surface); color: var(--text); }
+
+  .history-content { flex: 1; }
+
+  .json-view {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow: auto;
+    color: var(--text);
+    max-height: calc(100vh - 280px);
+  }
+
+  .human-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ── Config tab ── */
+  .config-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .config-list-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .config-list-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .config-items { flex: 1; overflow-y: auto; }
+
+  .config-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .config-item:hover { background: var(--muted); }
+  .config-item.selected { background: rgba(59,130,246,.1); border-left: 2px solid var(--accent); }
+
+  .config-item-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .config-delete-btn {
+    background: none;
+    border: none;
+    color: var(--dim);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: color var(--transition), background var(--transition);
+    flex-shrink: 0;
+  }
+  .config-delete-btn:hover { color: var(--danger); background: rgba(239,68,68,.1); }
+
+  .config-edit-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .config-edit-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .config-edit-name {
+    flex: 1;
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 5px 10px;
+    outline: none;
+  }
+  .config-edit-name:focus { border-color: var(--accent); }
+
+  .config-textarea {
+    flex: 1;
+    background: var(--bg);
+    border: none;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    padding: 16px;
+    resize: none;
+    outline: none;
+  }
+
+  .upload-drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--transition), background var(--transition);
+    margin: 0 14px 14px;
+  }
+  .upload-drop-zone:hover, .upload-drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(59,130,246,.04);
+  }
+
+  .upload-drop-text { color: var(--dim); font-size: 11px; }
+  .upload-drop-text strong { color: var(--accent); }
+
+  /* ── Log tab ── */
+  .log-layout {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .log-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .log-stream-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--dim);
+    margin-left: auto;
+  }
+
+  .log-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.7;
+    background: var(--bg);
+  }
+
+  .log-line {
+    display: flex;
+    gap: 12px;
+    padding: 1px 0;
+    animation: line-in .1s ease;
+  }
+
+  @keyframes line-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .log-time { color: var(--dim); flex-shrink: 0; font-size: 10px; }
+
+  .log-line.stderr .log-msg { color: var(--warn); }
+  .log-line.error  .log-msg { color: var(--danger); }
+  .log-line.state  .log-msg { color: var(--accent2); font-weight: 700; }
+  .log-line.progress .log-msg { color: var(--accent); }
+  .log-msg { word-break: break-all; white-space: pre-wrap; }
+
+  /* ── Shared ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+  }
+
+  .inline-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 2px;
+  }
+
+  .prop-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .prop-status-row:last-child { border-bottom: none; }
+
+  .prop-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+  }
+
+  .prop-details {
+    font-size: 10px;
+    color: var(--dim);
+  }
+</style>
+</head>
+<body>
+
+<div id="adore-monitor">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-logo">ADORE <span>/</span> Model Checker</div>
+
+    <div class="topbar-status">
+      <div class="pulse" id="pulse"></div>
+      <span id="status-text">IDLE</span>
+    </div>
+
+    <div class="topbar-right">
+      <input class="api-input" id="api-base" type="text"
+             placeholder="auto (or enter http://host/api/model_check)"
+             value="">
+      <button class="btn btn-primary"  id="btn-start">▶ Start</button>
+      <button class="btn btn-danger"   id="btn-stop" disabled>■ Stop</button>
+      <button class="btn btn-ghost"    id="btn-refresh">↺ Refresh</button>
+    </div>
+  </div>
+
+  <!-- Tab nav -->
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="monitor">Monitor</button>
+    <button class="tab-btn" data-tab="run">Run Session</button>
+    <button class="tab-btn" data-tab="history">History</button>
+    <button class="tab-btn" data-tab="config">Config Files</button>
+    <button class="tab-btn" data-tab="logs">Logs</button>
+  </div>
+
+  <!-- ── MONITOR TAB ── -->
+  <div class="tab-panel active" id="tab-monitor">
+    <div class="body">
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-label">Engine</div>
+          <div class="stat-row"><span class="stat-key">Status</span>       <span class="stat-val" id="sb-status">—</span></div>
+          <div class="stat-row"><span class="stat-key">Uptime</span>       <span class="stat-val" id="sb-uptime">—</span></div>
+          <div class="stat-row"><span class="stat-key">Windows</span>      <span class="stat-val" id="sb-windows">—</span></div>
+          <div class="stat-row"><span class="stat-key">Interval</span>     <span class="stat-val" id="sb-interval">—</span></div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">Violations</div>
+          <div class="stat-row"><span class="stat-key">Total</span>        <span class="stat-val danger" id="sb-total">0</span></div>
+          <div class="stat-row"><span class="stat-key">Last check</span>   <span class="stat-val" id="sb-last">—</span></div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">Filters</div>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <input class="api-input" id="filter-prop"
+                   style="width:100%;font-size:11px;padding:4px 6px"
+                   placeholder="Proposition…">
+            <input class="api-input" id="filter-vid"
+                   style="width:100%;font-size:11px;padding:4px 6px"
+                   placeholder="Vehicle ID…" type="number">
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-label">Continuous Mode</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="form-label" style="font-size:9px;color:var(--dim)">Config File</div>
+            <select class="form-select" id="continuous-config-select" style="font-size:11px;padding:4px 6px">
+              <option value="config/default.yaml">config/default.yaml</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-label">Disabled Propositions</div>
+          <div id="proposition-toggles" style="display:flex;flex-direction:column;gap:4px">
+            <div style="font-size:10px;color:var(--dim)">Start monitoring to populate</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main">
+        <div class="metrics-strip">
+          <div class="metric-card">
+            <div class="metric-label">Total Violations</div>
+            <div class="metric-value" id="m-total">0</div>
+            <div class="metric-sub">all time</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Windows Checked</div>
+            <div class="metric-value" id="m-windows">0</div>
+            <div class="metric-sub">model checks run</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Unique Props</div>
+            <div class="metric-value" id="m-props">0</div>
+            <div class="metric-sub">with violations</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Groups Affected</div>
+            <div class="metric-value" id="m-groups">0</div>
+            <div class="metric-sub">proposition groups</div>
+          </div>
+        </div>
+
+        <div class="lower">
+          <div class="chart-panel">
+            <div>
+              <div class="panel-title">Violations by Proposition</div>
+              <div class="bar-chart" id="prop-bars">
+                <div class="empty"><div class="empty-icon">◎</div>No violations recorded</div>
+              </div>
+            </div>
+            <div>
+              <div class="panel-title">Violations by Group</div>
+              <div class="bar-chart" id="group-bars">
+                <div class="empty"><div class="empty-icon">◎</div>No violations recorded</div>
+              </div>
+            </div>
+            <div>
+              <div class="panel-title">Violation Timeline (last 30 checks)</div>
+              <div class="sparkline-wrap">
+                <canvas class="sparkline" id="spark"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div class="feed-panel">
+            <div class="feed-header">
+              <span class="feed-title">Violation Feed</span>
+              <span class="feed-count" id="feed-count">0</span>
+            </div>
+            <div class="feed-list" id="feed-list">
+              <div class="empty"><div class="empty-icon">✓</div>No violations</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── RUN SESSION TAB ── -->
+  <div class="tab-panel" id="tab-run">
+    <div class="run-layout">
+      <div class="run-config-panel">
+        <div class="panel-title" style="margin-bottom:0">Session Configuration</div>
+
+        <div class="form-section">
+          <div class="form-label">Config File</div>
+          <select class="form-select" id="run-config-select">
+            <option value="config/default.yaml">config/default.yaml</option>
+          </select>
+        </div>
+
+        <div class="form-section">
+          <div class="form-label">Mode</div>
+          <select class="form-select" id="run-mode">
+            <option value="online">Online (Live ROS)</option>
+            <option value="offline">Offline (Bag File)</option>
+          </select>
+        </div>
+
+        <div class="form-section" id="run-vehicle-section">
+          <div class="form-label">Vehicle ID</div>
+          <input class="form-input" id="run-vehicle-id" type="number" value="0" min="0">
+        </div>
+
+        <div class="form-section" id="run-bag-section" style="display:none">
+          <div class="form-label">Bag File Path</div>
+          <input class="form-input" id="run-bag-file" type="text" placeholder="/path/to/recording.bag">
+        </div>
+
+        <div class="form-section">
+          <div class="form-label">Duration (seconds)</div>
+          <input class="form-input" id="run-duration" type="number" value="60" min="5" max="3600">
+        </div>
+
+        <div class="form-section">
+          <div class="form-label">Output Label (optional)</div>
+          <input class="form-input" id="run-label" type="text" placeholder="e.g. test-run-01">
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          <button class="btn btn-primary" id="btn-run-start" style="justify-content:center">▶ Start Session</button>
+          <button class="btn btn-danger"  id="btn-run-cancel" disabled style="justify-content:center">■ Cancel</button>
+        </div>
+      </div>
+
+      <div class="run-result-panel">
+        <div class="run-progress" id="run-progress">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <div class="progress-label" id="run-progress-label">Initializing…</div>
+            <div class="progress-timer" id="run-timer">0s</div>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill indeterminate" id="run-progress-bar"></div>
+          </div>
+        </div>
+
+        <div id="run-result-area">
+          <div class="empty" style="min-height:200px">
+            <div class="empty-icon">▷</div>
+            Configure and start a session to see results
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── HISTORY TAB ── -->
+  <div class="tab-panel" id="tab-history">
+    <div class="history-layout">
+      <div class="history-list-panel">
+        <div class="history-list-header">
+          <span class="history-list-title">Past Runs</span>
+          <button class="btn btn-ghost" id="btn-history-refresh" style="padding:3px 8px;font-size:10px">↺</button>
+        </div>
+        <div class="history-items" id="history-items">
+          <div class="empty"><div class="empty-icon">◎</div>No history yet</div>
+        </div>
+      </div>
+
+      <div class="history-detail-panel" id="history-detail-panel">
+        <div class="empty" style="min-height:200px">
+          <div class="empty-icon">◷</div>
+          Select a run to view results
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CONFIG TAB ── -->
+  <div class="tab-panel" id="tab-config">
+    <div class="config-layout">
+      <div class="config-list-panel">
+        <div class="config-list-header">
+          <span class="history-list-title" style="font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">Config Files</span>
+          <button class="btn btn-ghost" id="btn-config-new" style="padding:3px 8px;font-size:10px">+ New</button>
+        </div>
+
+        <div class="upload-drop-zone" id="config-drop-zone">
+          <div class="upload-drop-text">
+            Drop <strong>.yaml</strong> files here or <strong>click to upload</strong>
+          </div>
+          <input type="file" id="config-file-input" accept=".yaml,.yml" multiple style="display:none">
+        </div>
+
+        <div class="config-items" id="config-items">
+          <div class="empty"><div class="empty-icon">◎</div>No config files</div>
+        </div>
+      </div>
+
+      <div class="config-edit-panel">
+        <div class="config-edit-header">
+          <input class="config-edit-name" id="config-edit-name" type="text" placeholder="filename.yaml" value="">
+          <button class="btn btn-ok"    id="btn-config-save" disabled>Save</button>
+          <button class="btn btn-ghost" id="btn-config-download" disabled>↓ Download</button>
+        </div>
+        <textarea class="config-textarea" id="config-textarea"
+                  placeholder="Select or create a config file to edit its contents…" readonly></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOGS TAB ── -->
+  <div class="tab-panel" id="tab-logs">
+    <div class="log-layout">
+      <div class="log-toolbar">
+        <button class="btn btn-ghost" id="btn-log-clear" style="font-size:10px">Clear</button>
+        <button class="btn btn-ghost" id="btn-log-pause" style="font-size:10px">⏸ Pause</button>
+
+        <div style="display:flex;align-items:center;gap:6px;margin-left:8px">
+          <label style="font-family:var(--font-mono);font-size:10px;color:var(--dim);display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="log-filter-stderr" checked> stderr
+          </label>
+          <label style="font-family:var(--font-mono);font-size:10px;color:var(--dim);display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="log-filter-stdout" checked> stdout
+          </label>
+          <label style="font-family:var(--font-mono);font-size:10px;color:var(--dim);display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="log-filter-state" checked> state
+          </label>
+        </div>
+
+        <input class="api-input" id="log-filter-text" style="width:180px" placeholder="Filter…">
+
+        <div class="log-stream-status">
+          <div class="pulse" id="log-pulse"></div>
+          <span id="log-stream-label">Disconnected</span>
+        </div>
+      </div>
+
+      <div class="log-container" id="log-container">
+        <div class="empty">
+          <div class="empty-icon">▤</div>
+          Log stream will appear here
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /adore-monitor -->
+
+<!-- Violation detail drawer -->
+<div class="drawer" id="drawer">
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <div class="drawer-panel">
+    <div class="drawer-header">
+      <span class="drawer-title" id="drawer-prop">—</span>
+      <button class="btn btn-ghost" id="drawer-close" style="padding:3px 8px">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   ADORe Model Checker Dashboard — Enhanced
+   ================================================================ */
+
+const $ = id => document.getElementById(id);
+
+// ── API base ─────────────────────────────────────────────────────
+function apiBase() {
+  if (window.ADORE_API_BASE) return window.ADORE_API_BASE.replace(/\/$/, '');
+  const inputVal = $('api-base').value.trim();
+  if (inputVal) return inputVal.replace(/\/$/, '');
+  const loc  = window.location;
+  const path = loc.pathname.replace(/\/dashboard\/?$/, '');
+  return `${loc.protocol}//${loc.host}${path}`;
+}
+
+async function apiFetch(path, opts = {}) {
+  const url = apiBase() + path;
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Tab switching ─────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $(`tab-${tab}`).classList.add('active');
+    if (tab === 'history') loadHistory();
+    if (tab === 'config')  loadConfigs();
+    if (tab === 'logs')    connectLogStream();
+    if (tab === 'run')     loadConfigsIntoRunSelect();
+    if (tab === 'monitor') populateContinuousConfigSelect();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// MONITOR TAB (original logic preserved)
+// ════════════════════════════════════════════════════════════════
+let monitorState = {
+  running: false,
+  stats: {},
+  violations: [],
+  timeline: [],
+  pollTimer: null,
+};
+
+function fmtUptime(secs) {
+  if (!secs) return '—';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtIso(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function startMonitoring() {
+  setStatus('connecting');
+  try {
+    const configFile    = $('continuous-config-select').value || 'config/default.yaml';
+    const disabledProps = getDisabledPropositions();
+    await apiFetch('/continuous/disabled', {
+      method: 'POST',
+      body: JSON.stringify({ disabled_propositions: disabledProps }),
+    });
+    await apiFetch('/continuous/start', {
+      method: 'POST',
+      body: JSON.stringify({ config_file: configFile }),
+    });
+    setStatus('running');
+    startPolling();
+  } catch (e) {
+    setStatus('error', e.message);
+  }
+}
+
+function getDisabledPropositions() {
+  const result = [];
+  document.querySelectorAll('.prop-toggle-cb:not(:checked)').forEach(cb => {
+    result.push(cb.dataset.prop);
+  });
+  return result;
+}
+
+function populatePropositionToggles(violations) {
+  const seen = new Set();
+  violations.forEach(v => seen.add(v.proposition));
+  const byProp = monitorState.stats.violations_by_proposition || {};
+  Object.keys(byProp).forEach(p => seen.add(p));
+
+  if (!seen.size) return;
+
+  const container = $('proposition-toggles');
+  const existing  = new Set(
+    Array.from(container.querySelectorAll('.prop-toggle-cb')).map(cb => cb.dataset.prop)
+  );
+
+  const DISABLED_BY_DEFAULT = new Set(['NEAR_GOAL']);
+
+  seen.forEach(prop => {
+    if (existing.has(prop)) return;
+    const defaultOn = !DISABLED_BY_DEFAULT.has(prop);
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:10px;color:var(--text);padding:2px 0';
+    label.innerHTML = `
+      <input type="checkbox" class="prop-toggle-cb" data-prop="${prop}" ${defaultOn ? 'checked' : ''}
+             style="accent-color:var(--accent)">
+      <span style="font-family:var(--font-mono)">${prop.replace(/_/g,' ')}</span>`;
+    container.appendChild(label);
+  });
+
+  if (container.querySelector('[style*="Start monitoring"]')) {
+    container.querySelector('[style*="Start monitoring"]')?.remove();
+  }
+}
+
+async function populateContinuousConfigSelect() {
+  try {
+    const data    = await apiFetch('/configs');
+    const sel     = $('continuous-config-select');
+    const configs = data.configs || [];
+    if (!configs.length) return;
+    const current = sel.value;
+    sel.innerHTML = configs.map(c =>
+      `<option value="${c.name}" ${c.name === current ? 'selected' : ''}>${c.name}</option>`
+    ).join('');
+  } catch (_) {}
+}
+
+async function stopMonitoring() {
+  try { await apiFetch('/continuous/stop', { method: 'POST' }); } catch (_) {}
+  setStatus('idle');
+  stopPolling();
+  renderMonitor();
+}
+
+async function refresh() {
+  try {
+    const [statusData, violData] = await Promise.all([
+      apiFetch('/continuous/status'),
+      apiFetch('/continuous/violations/filtered?' + buildViolQuery()),
+    ]);
+    monitorState.running    = statusData.running;
+    monitorState.stats      = statusData.stats || {};
+    monitorState.violations = violData.violations || [];
+    const total = monitorState.stats.total_violations || 0;
+    monitorState.timeline.push(total);
+    if (monitorState.timeline.length > 30) monitorState.timeline.shift();
+    renderMonitor();
+    setStatus(monitorState.running ? 'running' : 'idle');
+  } catch (e) {
+    setStatus('error', e.message);
+  }
+}
+
+function buildViolQuery() {
+  const p = $('filter-prop').value.trim();
+  const v = $('filter-vid').value.trim();
+  const params = new URLSearchParams({ limit: '200' });
+  if (p) params.set('proposition', p);
+  if (v) params.set('vehicle_id', v);
+  return params.toString();
+}
+
+function startPolling() {
+  stopPolling();
+  refresh();
+  monitorState.pollTimer = setInterval(refresh, 5000);
+}
+
+function stopPolling() {
+  if (monitorState.pollTimer) { clearInterval(monitorState.pollTimer); monitorState.pollTimer = null; }
+}
+
+function setStatus(s, msg) {
+  const pulse = $('pulse');
+  const txt   = $('status-text');
+  pulse.className = 'pulse';
+  if (s === 'running') {
+    pulse.classList.add('active');
+    txt.textContent = 'MONITORING';
+    $('btn-start').disabled = true;
+    $('btn-stop').disabled  = false;
+    monitorState.running = true;
+  } else if (s === 'connecting') {
+    txt.textContent = 'CONNECTING…';
+    $('btn-start').disabled = true;
+    $('btn-stop').disabled  = true;
+  } else if (s === 'error') {
+    pulse.classList.add('error');
+    txt.textContent = 'ERROR' + (msg ? `: ${msg}` : '');
+    $('btn-start').disabled = false;
+    $('btn-stop').disabled  = true;
+    monitorState.running = false;
+  } else {
+    txt.textContent = 'IDLE';
+    $('btn-start').disabled = false;
+    $('btn-stop').disabled  = true;
+    monitorState.running = false;
+  }
+}
+
+function renderMonitor() {
+  renderSidebar();
+  renderMetrics();
+  renderPropBars();
+  renderGroupBars();
+  renderSparkline();
+  renderFeed();
+}
+
+function renderSidebar() {
+  const s = monitorState.stats;
+  $('sb-status').textContent  = monitorState.running ? 'ACTIVE' : 'STOPPED';
+  $('sb-status').className    = 'stat-val ' + (monitorState.running ? 'ok' : '');
+  $('sb-uptime').textContent  = fmtUptime(s.uptime_seconds);
+  $('sb-windows').textContent = s.windows_checked || 0;
+  $('sb-interval').textContent= s.interval_seconds ? `${s.interval_seconds}s` : '—';
+  $('sb-total').textContent   = s.total_violations || 0;
+  $('sb-last').textContent    = fmtTime(s.last_check_time);
+}
+
+function renderMetrics() {
+  const s = monitorState.stats;
+  const total  = s.total_violations || 0;
+  $('m-total').textContent   = total;
+  $('m-total').className     = 'metric-value ' + (total > 0 ? 'danger' : 'ok');
+  $('m-windows').textContent = s.windows_checked  || 0;
+  $('m-props').textContent   = Object.keys(s.violations_by_proposition || {}).length;
+  $('m-groups').textContent  = Object.keys(s.violations_by_group || {}).length;
+}
+
+function renderBars(containerId, data) {
+  const el = $(containerId);
+  if (!data || !Object.keys(data).length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">◎</div>No violations recorded</div>';
+    return;
+  }
+  const sorted = Object.entries(data).sort((a, b) => b[1] - a[1]);
+  const max    = sorted[0][1];
+  el.innerHTML = sorted.map(([name, count]) => {
+    const pct = max > 0 ? (count / max) * 100 : 0;
+    const cls = pct >= 80 ? 'high' : pct >= 40 ? 'med' : '';
+    return `<div class="bar-row">
+      <div class="bar-name" title="${name}">${name.replace(/_/g, ' ')}</div>
+      <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
+      <div class="bar-count">${count}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderPropBars()  { renderBars('prop-bars',  monitorState.stats.violations_by_proposition); }
+function renderGroupBars() { renderBars('group-bars', monitorState.stats.violations_by_group); }
+
+function renderSparkline() {
+  const canvas = $('spark');
+  const ctx    = canvas.getContext('2d');
+  const dpr    = window.devicePixelRatio || 1;
+  const w      = canvas.offsetWidth;
+  const h      = canvas.offsetHeight;
+  canvas.width  = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const data = monitorState.timeline;
+  if (data.length < 2) {
+    ctx.fillStyle = 'rgba(90,106,136,.2)';
+    ctx.fillRect(0, h / 2 - 1, w, 2);
+    return;
+  }
+
+  const deltas = [];
+  for (let i = 1; i < data.length; i++) deltas.push(Math.max(0, data[i] - data[i - 1]));
+  const maxD = Math.max(...deltas, 1);
+  const pad  = 4;
+  const step = (w - pad * 2) / Math.max(deltas.length - 1, 1);
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(59,130,246,.35)');
+  grad.addColorStop(1, 'rgba(59,130,246,0)');
+
+  ctx.beginPath();
+  deltas.forEach((v, i) => {
+    const x = pad + i * step;
+    const y = pad + (1 - v / maxD) * (h - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(pad + (deltas.length - 1) * step, h);
+  ctx.lineTo(pad, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  deltas.forEach((v, i) => {
+    const x = pad + i * step;
+    const y = pad + (1 - v / maxD) * (h - pad * 2);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = '#3b82f6';
+  ctx.lineWidth   = 1.5;
+  ctx.stroke();
+}
+
+function renderFeed() {
+  const list  = $('feed-list');
+  const viols = monitorState.violations;
+  $('feed-count').textContent = viols.length;
+  populatePropositionToggles(viols);
+  if (!viols.length) {
+    list.innerHTML = '<div class="empty"><div class="empty-icon">✓</div>No violations</div>';
+    return;
+  }
+  list.innerHTML = viols.map(v => {
+    const score = extractScore(v);
+    return `
+    <div class="feed-item" onclick="openDrawer('${v.violation_id}')">
+      <div class="feed-item-top">
+        <span class="feed-prop">${v.proposition}</span>
+        <span class="feed-time">${fmtIso(v.timestamp_iso)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <span class="tag ${v.logic_type}">${v.logic_type.toUpperCase()}</span>
+        <span class="feed-group">${v.group.replace(/_/g,' ')} · vehicle ${v.vehicle_id}</span>
+      </div>
+      ${score !== null ? `<div style="margin-top:3px">${scoreCell(score)}</div>` : ''}
+      <div class="feed-desc">${v.description || '—'}</div>
+    </div>`}).join('');
+}
+
+function openDrawer(vid) {
+  const v = monitorState.violations.find(x => x.violation_id === vid);
+  if (!v) return;
+  $('drawer-prop').textContent = v.proposition;
+  const stats    = v.statistics || {};
+  const statKeys = Object.entries(stats)
+    .filter(([, val]) => typeof val === 'number' || typeof val === 'string')
+    .slice(0, 16);
+  const score = extractScore(v);
+  $('drawer-body').innerHTML = `
+    <div class="detail-section"><div class="detail-key">Violation ID</div><div class="detail-val">${v.violation_id}</div></div>
+    <div class="detail-section"><div class="detail-key">Timestamp</div><div class="detail-val">${v.timestamp_iso || fmtTime(v.timestamp)}</div></div>
+    <div class="detail-section"><div class="detail-key">Vehicle</div><div class="detail-val">${v.vehicle_id}</div></div>
+    <div class="detail-section"><div class="detail-key">Group</div><div class="detail-val">${v.group}</div></div>
+    <div class="detail-section"><div class="detail-key">Formula</div><div class="detail-val">
+      <span class="tag ${v.logic_type}">${v.logic_type.toUpperCase()}</span>${v.formula_type}
+    </div></div>
+    <div class="detail-section"><div class="detail-key">Description</div><div class="detail-val" style="white-space:normal;line-height:1.6">${v.description || '—'}</div></div>
+    ${score !== null ? `<div class="detail-section"><div class="detail-key">Score</div><div class="detail-val">${scoreCell(score)}</div></div>` : ''}
+    ${statKeys.length ? `<div class="detail-section"><div class="detail-key">Statistics</div>
+      <div class="stats-grid">${statKeys.map(([k, val]) => `
+        <div class="stats-cell">
+          <div class="stats-cell-key">${k.replace(/_/g,' ')}</div>
+          <div class="stats-cell-val">${typeof val === 'number' ? val.toFixed(3).replace(/\.?0+$/, '') : val}</div>
+        </div>`).join('')}</div></div>` : ''}
+  `;
+  $('drawer').classList.add('open');
+}
+
+$('drawer-close').addEventListener('click', () => $('drawer').classList.remove('open'));
+$('drawer-backdrop').addEventListener('click', () => $('drawer').classList.remove('open'));
+$('btn-start').addEventListener('click', startMonitoring);
+$('btn-stop').addEventListener('click', stopMonitoring);
+$('btn-refresh').addEventListener('click', () => refresh().catch(e => setStatus('error', e.message)));
+$('filter-prop').addEventListener('input', () => { if (monitorState.running || monitorState.stats.total_violations) refresh(); });
+$('filter-vid').addEventListener('input',  () => { if (monitorState.running || monitorState.stats.total_violations) refresh(); });
+window.addEventListener('resize', renderSparkline);
+
+(async () => {
+  populateContinuousConfigSelect();
+  try {
+    const s = await apiFetch('/continuous/status');
+    if (s.running) { setStatus('running'); startPolling(); }
+    else { setStatus('idle'); if (s.engine_initialized) { monitorState.stats = s.stats || {}; renderMonitor(); } }
+  } catch (_) {}
+})();
+
+
+// ════════════════════════════════════════════════════════════════
+// RUN SESSION TAB
+// ════════════════════════════════════════════════════════════════
+let runSession = {
+  active: false,
+  runId: null,
+  startTime: null,
+  duration: 60,
+  timerInterval: null,
+  pollInterval: null,
+};
+
+$('run-mode').addEventListener('change', () => {
+  const offline = $('run-mode').value === 'offline';
+  $('run-vehicle-section').style.display = offline ? 'none' : '';
+  $('run-bag-section').style.display     = offline ? '' : 'none';
+});
+
+async function loadConfigsIntoRunSelect() {
+  try {
+    const data = await apiFetch('/configs');
+    const sel  = $('run-config-select');
+    const configs = data.configs || [];
+    if (!configs.length) return;
+    sel.innerHTML = configs.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+  } catch (_) {}
+}
+
+$('btn-run-start').addEventListener('click', async () => {
+  const config   = $('run-config-select').value || 'config/default.yaml';
+  const mode     = $('run-mode').value;
+  const duration = parseInt($('run-duration').value) || 60;
+  const label    = $('run-label').value.trim();
+  const vehicleId= parseInt($('run-vehicle-id').value) || 0;
+  const bagFile  = $('run-bag-file').value.trim();
+
+  const body = { config_file: config, mode, duration, label };
+  if (mode === 'online') body.vehicle_id = vehicleId;
+  else body.bag_file = bagFile;
+
+  $('btn-run-start').disabled  = true;
+  $('btn-run-cancel').disabled = false;
+
+  const prog = $('run-progress');
+  prog.classList.add('visible');
+  $('run-progress-label').textContent = 'Starting…';
+  $('run-progress-bar').className     = 'progress-bar-fill indeterminate';
+  $('run-result-area').innerHTML      = '';
+
+  runSession.active    = true;
+  runSession.startTime = Date.now();
+  runSession.duration  = duration;
+
+  runSession.timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - runSession.startTime) / 1000);
+    $('run-timer').textContent = `${elapsed}s`;
+    if (duration > 0) {
+      const pct = Math.min((elapsed / duration) * 100, 100);
+      $('run-progress-bar').className = 'progress-bar-fill';
+      $('run-progress-bar').style.width = pct + '%';
+    }
+  }, 500);
+
+  try {
+    const result = await apiFetch('/session/start', { method: 'POST', body: JSON.stringify(body) });
+    runSession.runId = result.run_id;
+    $('run-progress-label').textContent = `Running (run ${result.run_id})…`;
+    pollRunSession(result.run_id);
+  } catch (e) {
+    finishRunSession(null, e.message);
+  }
+});
+
+$('btn-run-cancel').addEventListener('click', async () => {
+  if (!runSession.runId) { finishRunSession(null, 'Cancelled'); return; }
+  try { await apiFetch(`/session/${runSession.runId}/cancel`, { method: 'POST' }); } catch (_) {}
+  finishRunSession(null, 'Cancelled by user');
+});
+
+function pollRunSession(runId) {
+  runSession.pollInterval = setInterval(async () => {
+    try {
+      const data = await apiFetch(`/result/${runId}`);
+      const status = data.status;
+      $('run-progress-label').textContent = `Status: ${status}`;
+
+      if (['completed', 'failed', 'cancelled', 'error'].includes(status)) {
+        clearInterval(runSession.pollInterval);
+        finishRunSession(data, null);
+      }
+    } catch (e) {
+      clearInterval(runSession.pollInterval);
+      finishRunSession(null, e.message);
+    }
+  }, 2000);
+}
+
+function finishRunSession(data, errorMsg) {
+  clearInterval(runSession.timerInterval);
+  clearInterval(runSession.pollInterval);
+  runSession.active = false;
+
+  $('btn-run-start').disabled  = false;
+  $('btn-run-cancel').disabled = true;
+  $('run-progress').classList.remove('visible');
+
+  if (errorMsg && !data) {
+    $('run-result-area').innerHTML = `
+      <div class="result-card">
+        <div class="result-card-header">
+          <span class="result-card-title">Session Failed</span>
+          <span class="result-badge fail">FAILED</span>
+        </div>
+        <div style="padding:16px;font-family:var(--font-mono);font-size:11px;color:var(--danger)">${errorMsg}</div>
+      </div>`;
+    return;
+  }
+
+  if (data) renderRunResult(data);
+}
+
+// ── Score / grade helpers ─────────────────────────────────────────
+function scoreToGrades(score) {
+  // score is 0–100 (higher = better) or 0–1 (normalised).
+  const s = score > 1 ? score : score * 100;
+  let de, us, color;
+  if      (s >= 95) { de = '1';  us = 'A+'; color = '#22c55e'; }
+  else if (s >= 87) { de = '1-'; us = 'A';  color = '#4ade80'; }
+  else if (s >= 80) { de = '2+'; us = 'A-'; color = '#86efac'; }
+  else if (s >= 73) { de = '2';  us = 'B+'; color = '#a3e635'; }
+  else if (s >= 67) { de = '2-'; us = 'B';  color = '#bef264'; }
+  else if (s >= 60) { de = '3+'; us = 'B-'; color = '#fde047'; }
+  else if (s >= 55) { de = '3';  us = 'C+'; color = '#fbbf24'; }
+  else if (s >= 50) { de = '3-'; us = 'C';  color = '#f97316'; }
+  else if (s >= 45) { de = '4+'; us = 'C-'; color = '#fb923c'; }
+  else if (s >= 40) { de = '4';  us = 'D';  color = '#f87171'; }
+  else              { de = '5';  us = 'F';  color = '#ef4444'; }
+  return { de, us, color, s: s.toFixed(1) };
+}
+
+function scoreCell(score) {
+  const { de, us, color, s } = scoreToGrades(score);
+  return `<span style="
+      display:inline-flex;align-items:center;gap:5px;
+      font-family:var(--font-mono);font-size:11px;font-weight:700;">
+    <span style="
+        background:${color}22;border:1px solid ${color};color:${color};
+        border-radius:3px;padding:1px 6px;min-width:28px;text-align:center">
+      ${de}
+    </span>
+    <span style="color:${color}">${us}</span>
+    <span style="color:var(--dim);font-weight:400;font-size:10px">${s}%</span>
+    <span style="
+        height:6px;width:60px;background:var(--muted);border-radius:3px;overflow:hidden;display:inline-block">
+      <span style="display:block;height:100%;width:${Math.min(parseFloat(s),100)}%;background:${color};border-radius:3px"></span>
+    </span>
+  </span>`;
+}
+
+function extractScore(pr) {
+  const s = pr.statistics || {};
+  if (s.score            !== undefined) return s.score;
+  if (s.compliance_rate  !== undefined) return s.compliance_rate;
+  if (s.success_rate     !== undefined) return s.success_rate;
+  return null;
+}
+
+function renderRunResult(data) {
+  const results  = data.results || {};
+  const summary  = results.SUMMARY || {};
+  const overallOk = summary.overall_result === 'PASS';
+  const props    = Object.entries(results).filter(([k]) => k !== 'SUMMARY');
+
+  const propRows = props.map(([name, pr]) => {
+    const score = extractScore(pr);
+    const statusCls = pr.status === 'PASS' ? 'pass' : 'fail';
+    return `<tr>
+      <td style="font-weight:600">${name}</td>
+      <td class="${statusCls}">${pr.status || '—'}</td>
+      <td>${pr.states_analyzed ?? '—'}</td>
+      <td>${pr.kripke_states ?? '—'}</td>
+      <td>${score !== null ? scoreCell(score) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  $('run-result-area').innerHTML = `
+    <div class="result-card">
+      <div class="result-card-header">
+        <span class="result-card-title">Run ${data.run_id} · ${data.config_file || ''}</span>
+        <span class="result-badge ${overallOk ? 'pass' : 'fail'}">${summary.overall_result || data.status}</span>
+      </div>
+      ${summary.total_propositions !== undefined ? `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border)">
+        ${[
+          ['Total',  summary.total_propositions],
+          ['Passed', summary.passed],
+          ['Failed', summary.failed],
+          ['Rate',   summary.success_rate !== undefined ? (summary.success_rate * 100).toFixed(0) + '%' : '—'],
+        ].map(([k, v]) => `
+          <div style="background:var(--surface);padding:10px 14px">
+            <div class="metric-label">${k}</div>
+            <div style="font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--text)">${v ?? '—'}</div>
+          </div>`).join('')}
+      </div>` : ''}
+      ${props.length ? `
+      <table class="result-table">
+        <thead><tr><th>Proposition</th><th>Status</th><th>States</th><th>Kripke</th><th>Score</th></tr></thead>
+        <tbody>${propRows}</tbody>
+      </table>` : ''}
+    </div>`;
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// HISTORY TAB
+// ════════════════════════════════════════════════════════════════
+let historyState = { runs: [], selectedId: null, view: 'human' };
+
+async function loadHistory() {
+  try {
+    const data = await apiFetch('/history');
+    historyState.runs = data.runs || [];
+    renderHistoryList();
+  } catch (e) {
+    $('history-items').innerHTML = `<div class="empty"><div class="empty-icon">!</div>${e.message}</div>`;
+  }
+}
+
+function renderHistoryList() {
+  const runs = historyState.runs;
+  if (!runs.length) {
+    $('history-items').innerHTML = '<div class="empty"><div class="empty-icon">◎</div>No history yet</div>';
+    return;
+  }
+  $('history-items').innerHTML = runs.map(r => {
+    const ts  = r.completed_at ? new Date(r.completed_at).toLocaleString() : '—';
+    const ok  = r.overall_result === 'PASS';
+    const cls = historyState.selectedId === r.run_id ? ' selected' : '';
+    return `<div class="history-item${cls}" onclick="selectHistoryRun('${r.run_id}')">
+      <div class="history-item-top">
+        <span class="history-item-id">Run ${r.run_id}</span>
+        <span class="result-badge ${ok ? 'pass' : 'fail'}" style="font-size:9px">${r.overall_result || r.status}</span>
+      </div>
+      <div class="history-item-config">${r.config_file || '—'}</div>
+      <div class="history-item-time">${ts}</div>
+    </div>`;
+  }).join('');
+}
+
+async function selectHistoryRun(runId) {
+  historyState.selectedId = runId;
+  renderHistoryList();
+
+  const panel = $('history-detail-panel');
+  panel.innerHTML = '<div class="empty"><div class="empty-icon" style="animation:beat 1s infinite">◎</div>Loading…</div>';
+
+  try {
+    const [resultData, logData] = await Promise.all([
+      apiFetch(`/result/${runId}`),
+      apiFetch(`/history/${runId}/log`).catch(() => ({ log: null })),
+    ]);
+    renderHistoryDetail(resultData, logData.log);
+  } catch (e) {
+    panel.innerHTML = `<div class="empty"><div class="empty-icon">!</div>${e.message}</div>`;
+  }
+}
+
+function renderHistoryDetail(data, log) {
+  const panel  = $('history-detail-panel');
+  const view   = historyState.view;
+  const jsonStr= JSON.stringify(data, null, 2);
+
+  panel.innerHTML = `
+    <div class="history-toolbar">
+      <span style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--text)">Run ${data.run_id}</span>
+      <div class="view-toggle">
+        <button class="view-toggle-btn ${view === 'human' ? 'active' : ''}" onclick="setHistoryView('human')">Summary</button>
+        <button class="view-toggle-btn ${view === 'json'  ? 'active' : ''}" onclick="setHistoryView('json')">JSON</button>
+        ${log ? `<button class="view-toggle-btn ${view === 'log' ? 'active' : ''}" onclick="setHistoryView('log')">Log</button>` : ''}
+      </div>
+      <button class="btn btn-ghost" style="font-size:10px;margin-left:auto" onclick="downloadHistoryJson('${data.run_id}')">↓ JSON</button>
+    </div>
+    <div class="history-content" id="history-content-body"></div>
+  `;
+
+  window._historyDetailData = { data, log, jsonStr };
+  renderHistoryContent();
+}
+
+function setHistoryView(v) {
+  historyState.view = v;
+  document.querySelectorAll('.view-toggle-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === v || (v === 'human' && b.textContent === 'Summary'));
+  });
+  renderHistoryContent();
+}
+
+function renderHistoryContent() {
+  const el = $('history-content-body');
+  if (!el || !window._historyDetailData) return;
+  const { data, log, jsonStr } = window._historyDetailData;
+
+  if (historyState.view === 'json') {
+    el.innerHTML = `<pre class="json-view">${escapeHtml(jsonStr)}</pre>`;
+    return;
+  }
+  if (historyState.view === 'log') {
+    el.innerHTML = log
+      ? `<pre class="json-view" style="white-space:pre-wrap">${escapeHtml(log)}</pre>`
+      : '<div class="empty"><div class="empty-icon">—</div>No log available</div>';
+    return;
+  }
+
+  renderRunResult(data);
+  el.innerHTML = $('run-result-area').innerHTML;
+}
+
+async function downloadHistoryJson(runId) {
+  const data = await apiFetch(`/result/${runId}`).catch(() => null);
+  if (!data) return;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `model_check_run_${runId}.json`;
+  a.click();
+}
+
+$('btn-history-refresh').addEventListener('click', loadHistory);
+
+
+// ════════════════════════════════════════════════════════════════
+// CONFIG TAB
+// ════════════════════════════════════════════════════════════════
+let configState = { configs: [], selectedName: null };
+
+async function loadConfigs() {
+  try {
+    const data = await apiFetch('/configs');
+    configState.configs = data.configs || [];
+    renderConfigList();
+  } catch (e) {
+    $('config-items').innerHTML = `<div class="empty"><div class="empty-icon">!</div>${e.message}</div>`;
+  }
+}
+
+function renderConfigList() {
+  const items = configState.configs;
+  if (!items.length) {
+    $('config-items').innerHTML = '<div class="empty"><div class="empty-icon">◎</div>No config files</div>';
+    return;
+  }
+  $('config-items').innerHTML = items.map(c => {
+    const sel = configState.selectedName === c.name ? ' selected' : '';
+    return `<div class="config-item${sel}" onclick="selectConfig('${c.name}')">
+      <span class="config-item-name" title="${c.name}">${c.name}</span>
+      <button class="config-delete-btn" onclick="deleteConfig(event,'${c.name}')" title="Delete">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function selectConfig(name) {
+  configState.selectedName = name;
+  renderConfigList();
+
+  try {
+    const data = await apiFetch(`/configs/${encodeURIComponent(name)}`);
+    $('config-edit-name').value    = name;
+    $('config-textarea').value     = data.content;
+    $('config-textarea').readOnly  = false;
+    $('btn-config-save').disabled  = false;
+    $('btn-config-download').disabled = false;
+  } catch (e) {
+    $('config-textarea').value = `Error loading config: ${e.message}`;
+  }
+}
+
+$('btn-config-new').addEventListener('click', () => {
+  configState.selectedName = null;
+  renderConfigList();
+  $('config-edit-name').value   = 'new_config.yaml';
+  $('config-textarea').value    = '# ADORe Model Checker Configuration\n';
+  $('config-textarea').readOnly = false;
+  $('btn-config-save').disabled = false;
+  $('btn-config-download').disabled = true;
+});
+
+$('btn-config-save').addEventListener('click', async () => {
+  const name    = $('config-edit-name').value.trim();
+  const content = $('config-textarea').value;
+  if (!name) { alert('Filename required'); return; }
+
+  try {
+    await apiFetch('/configs', {
+      method: 'POST',
+      body: JSON.stringify({ name, content }),
+    });
+    await loadConfigs();
+    configState.selectedName = name;
+    renderConfigList();
+  } catch (e) {
+    alert(`Save failed: ${e.message}`);
+  }
+});
+
+$('btn-config-download').addEventListener('click', () => {
+  const name    = $('config-edit-name').value.trim();
+  const content = $('config-textarea').value;
+  const blob    = new Blob([content], { type: 'text/yaml' });
+  const a       = document.createElement('a');
+  a.href        = URL.createObjectURL(blob);
+  a.download    = name || 'config.yaml';
+  a.click();
+});
+
+async function deleteConfig(e, name) {
+  e.stopPropagation();
+  if (!confirm(`Delete "${name}"?`)) return;
+  try {
+    await apiFetch(`/configs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (configState.selectedName === name) {
+      configState.selectedName = null;
+      $('config-edit-name').value   = '';
+      $('config-textarea').value    = '';
+      $('config-textarea').readOnly = true;
+      $('btn-config-save').disabled = true;
+    }
+    await loadConfigs();
+  } catch (e2) {
+    alert(`Delete failed: ${e2.message}`);
+  }
+}
+
+// Drag-and-drop upload
+const dropZone = $('config-drop-zone');
+const fileInput = $('config-file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  uploadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
+
+async function uploadFiles(files) {
+  for (const file of files) {
+    if (!file.name.match(/\.ya?ml$/i)) continue;
+    const content = await file.text();
+    try {
+      await apiFetch('/configs', {
+        method: 'POST',
+        body: JSON.stringify({ name: file.name, content }),
+      });
+    } catch (e) {
+      console.error(`Upload failed for ${file.name}:`, e);
+    }
+  }
+  await loadConfigs();
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// LOGS TAB
+// ════════════════════════════════════════════════════════════════
+let logState = {
+  paused: false,
+  lines: [],
+  eventSource: null,
+};
+
+function connectLogStream() {
+  if (logState.eventSource) return;
+
+  const url = apiBase() + '/logs/stream';
+  const es  = new EventSource(url);
+  logState.eventSource = es;
+
+  const pulse = $('log-pulse');
+  const label = $('log-stream-label');
+
+  es.onopen = () => {
+    pulse.className = 'pulse active';
+    label.textContent = 'Connected';
+    const container = $('log-container');
+    if (container.querySelector('.empty')) container.innerHTML = '';
+  };
+
+  es.onmessage = e => {
+    if (logState.paused) return;
+    try {
+      const msg = JSON.parse(e.data);
+      appendLogLine(msg);
+    } catch (_) {
+      appendLogLine({ text: e.data, stream: 'stdout' });
+    }
+  };
+
+  es.onerror = () => {
+    pulse.className = 'pulse error';
+    label.textContent = 'Disconnected';
+    es.close();
+    logState.eventSource = null;
+    setTimeout(connectLogStream, 4000);
+  };
+}
+
+function appendLogLine(msg) {
+  const showStderr   = $('log-filter-stderr').checked;
+  const showStdout   = $('log-filter-stdout').checked;
+  const showState    = $('log-filter-state').checked;
+  const filterText   = $('log-filter-text').value.toLowerCase();
+  const text         = msg.text || '';
+  const stream       = msg.stream || 'stdout';
+
+  if (stream === 'stderr' && !showStderr) return;
+  if (stream === 'stdout' && !showStdout) return;
+  if (filterText && !text.toLowerCase().includes(filterText)) return;
+
+  let lineClass = stream;
+  if (text.startsWith('[STATE]:'))    lineClass = 'state';
+  if (text.startsWith('[PROGRESS]:')) lineClass = 'progress';
+  if (text.toLowerCase().includes('error')) lineClass = 'error';
+
+  const container = $('log-container');
+  const line = document.createElement('div');
+  line.className = `log-line ${lineClass}`;
+  line.innerHTML = `
+    <span class="log-time">${msg.time || new Date().toLocaleTimeString()}</span>
+    <span class="log-msg">${escapeHtml(text)}</span>`;
+  container.appendChild(line);
+
+  if (container.children.length > 2000) container.removeChild(container.firstChild);
+
+  container.scrollTop = container.scrollHeight;
+}
+
+$('btn-log-clear').addEventListener('click', () => {
+  $('log-container').innerHTML = '';
+});
+
+$('btn-log-pause').addEventListener('click', () => {
+  logState.paused = !logState.paused;
+  $('btn-log-pause').textContent = logState.paused ? '▶ Resume' : '⏸ Pause';
+});
+
+['log-filter-stderr', 'log-filter-stdout', 'log-filter-state', 'log-filter-text'].forEach(id => {
+  $(id).addEventListener('change', () => {});
+  if ($(id).tagName === 'INPUT' && $(id).type === 'text') {
+    $(id).addEventListener('input', () => {});
+  }
+});
+
+
+// ════════════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════════════
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Expose for inline onclick handlers
+window.openDrawer          = openDrawer;
+window.selectHistoryRun    = selectHistoryRun;
+window.setHistoryView      = setHistoryView;
+window.downloadHistoryJson = downloadHistoryJson;
+window.selectConfig        = selectConfig;
+window.deleteConfig        = deleteConfig;
+</script>
+</body>
+</html>

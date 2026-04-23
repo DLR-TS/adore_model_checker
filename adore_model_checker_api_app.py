@@ -2,7 +2,12 @@
 
 import sys
 import os
-from flask import Flask
+import json
+import queue
+import threading
+import time
+from datetime import datetime
+from flask import Flask, Response, request, jsonify
 
 
 def setup_imports():
@@ -16,38 +21,598 @@ def setup_imports():
         from adore_model_checker.model_checker_api import get_model_check_blueprint, stop_model_check_worker
     return get_model_check_blueprint, stop_model_check_worker
 
+
+def _dashboard_html():
+    # 1. Next to this file (development: vendor/adore_model_checker/)
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, 'adore_model_checker_dashboard.html'),
+        # Inside the adore_model_checker package subdir (installed package)
+        os.path.join(here, 'adore_model_checker', 'adore_model_checker_dashboard.html'),
+        os.path.join(here, '..', 'adore_model_checker_dashboard.html'),
+    ]
+    for path in candidates:
+        abs_path = os.path.normpath(path)
+        if os.path.exists(abs_path):
+            with open(abs_path, 'r') as fh:
+                return fh.read()
+
+    # 2. importlib.resources — works for installed wheels
+    try:
+        from importlib.resources import files
+        resource = files('adore_model_checker').joinpath('adore_model_checker_dashboard.html')
+        if resource.is_file():
+            return resource.read_text(encoding='utf-8')
+    except Exception:
+        pass
+
+    return "<h1>Dashboard not found</h1><p>adore_model_checker_dashboard.html missing.</p>"
+
+
+# ── Config file storage ──────────────────────────────────────────
+def _config_dir():
+    """Resolve the directory used to store uploaded/managed config files."""
+    candidates = [
+        os.environ.get('ADORE_CONFIG_DIR'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config'),
+    ]
+    for path in candidates:
+        if path:
+            os.makedirs(path, exist_ok=True)
+            _seed_default_config(path)
+            return path
+    raise RuntimeError("Cannot determine config directory")
+
+
+def _seed_default_config(config_dir):
+    """Copy or write default.yaml, ensuring NEAR_GOAL is disabled."""
+    dest = os.path.join(config_dir, 'default.yaml')
+    if os.path.exists(dest):
+        _patch_near_goal(dest)
+        return
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    search = [
+        os.path.join(here, 'default.yaml'),
+        os.path.join(here, '..', 'config', 'default.yaml'),
+        os.path.join(here, 'config', 'default.yaml'),
+    ]
+    for src in search:
+        if os.path.exists(src):
+            import shutil
+            shutil.copy2(src, dest)
+            _patch_near_goal(dest)
+            return
+
+    with open(dest, 'w') as f:
+        f.write(_DEFAULT_YAML)
+
+
+def _patch_near_goal(path):
+    """Ensure NEAR_GOAL.enabled is false in an existing config file."""
+    try:
+        import yaml
+        with open(path) as f:
+            cfg = yaml.safe_load(f)
+        patched = False
+        for vehicle in (cfg or {}).get('vehicles', []):
+            props = vehicle.get('propositions', {})
+            if isinstance(props, dict) and 'NEAR_GOAL' in props:
+                if props['NEAR_GOAL'].get('enabled', True):
+                    props['NEAR_GOAL']['enabled'] = False
+                    patched = True
+        if patched:
+            with open(path, 'w') as f:
+                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+    except Exception:
+        pass
+
+
+_DEFAULT_YAML = """\
+# ADORe Model Checker — default configuration
+# Each proposition supports an 'enabled' flag for continuous monitoring.
+# Set enabled: false to exclude a proposition from continuous checks.
+
+monitoring:
+  monitoring_frequency: 10.0
+  buffer_size: 1000
+  log_level: INFO
+  debug_mode: false
+
+safety_parameters:
+  max_speed: 30.0
+  goal_reach_distance: 5.0
+  time_to_collision_threshold: 3.0
+  emergency_brake_deceleration: -8.0
+  max_acceleration_rate: 2.0
+  max_deceleration_rate: -3.0
+  max_steering_rate: 45.0
+
+continuous_monitoring:
+  enabled: false
+  interval_seconds: 30.0
+  window_size: 300
+
+vehicles:
+  - id: 0
+    proposition_groups:
+      basic_safety:
+        enabled: true
+        description: Core safety propositions
+
+    propositions:
+      EGO_SPEED:
+        enabled: true
+        atomic_prop: speed_safe
+        formula_type: always
+        threshold: 13.89
+        data_sources:
+          vehicle_state:
+            topic: /ego_vehicle/vehicle_state/dynamic
+            field_path: vx
+            transform_function: abs
+            cache_duration: 0.1
+        evaluation_function: speed_limit_evaluator
+
+      NEAR_GOAL:
+        enabled: false
+        atomic_prop: goal_reached
+        formula_type: eventually
+        threshold: 5.0
+        data_sources:
+          route:
+            topic: /ego_vehicle/route
+            field_path: ''
+            cache_duration: 5.0
+          vehicle_state:
+            topic: /ego_vehicle/vehicle_state/dynamic
+            field_path: ''
+            cache_duration: 0.1
+        evaluation_function: near_goal_evaluator
+
+      DECELERATION:
+        enabled: true
+        atomic_prop: deceleration_safe
+        formula_type: always
+        threshold: -6.0
+        data_sources:
+          vehicle_state:
+            topic: /ego_vehicle/vehicle_state/dynamic
+            field_path: ax
+            cache_duration: 0.1
+          brake_status:
+            topic: /ego_vehicle/brake_status
+            field_path: active
+            cache_duration: 0.1
+        evaluation_function: deceleration_evaluator
+
+      ACCELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: acceleration_compliant
+        formula_type: always
+        threshold: 1.5
+        data_sources:
+          measured_acceleration:
+            topic: /ego_vehicle/vehicle_state/dynamic
+            field_path: ax
+            cache_duration: 0.1
+          commanded_acceleration:
+            topic: /ego_vehicle/next_vehicle_command
+            field_path: acceleration
+            cache_duration: 0.1
+        evaluation_function: acceleration_compliance_evaluator
+
+      DECELERATION_COMPLIANCE:
+        enabled: true
+        atomic_prop: deceleration_compliant
+        formula_type: always
+        threshold: 2.0
+        data_sources:
+          measured_acceleration:
+            topic: /ego_vehicle/vehicle_state/dynamic
+            field_path: ax
+            cache_duration: 0.1
+          commanded_acceleration:
+            topic: /ego_vehicle/next_vehicle_command
+            field_path: acceleration
+            cache_duration: 0.1
+        evaluation_function: deceleration_compliance_evaluator
+"""
+
+
+def _safe_config_name(name):
+    """Return True if name is a safe relative yaml filename."""
+    return (
+        name
+        and not os.sep in name
+        and not name.startswith('.')
+        and name.lower().endswith(('.yaml', '.yml'))
+    )
+
+
+# ── Log broadcaster ──────────────────────────────────────────────
+class LogBroadcaster:
+    """Fan out log lines to all active SSE clients."""
+
+    def __init__(self, maxlen=5000):
+        self._lock = threading.Lock()
+        self._clients = []
+        self._buffer = []
+        self._maxlen = maxlen
+
+    def write(self, text, stream='stdout'):
+        msg = json.dumps({
+            'text': text.rstrip(),
+            'stream': stream,
+            'time': datetime.now().strftime('%H:%M:%S'),
+        })
+        with self._lock:
+            self._buffer.append(msg)
+            if len(self._buffer) > self._maxlen:
+                self._buffer.pop(0)
+            for q in list(self._clients):
+                try:
+                    q.put_nowait(msg)
+                except Exception:
+                    pass
+
+    def subscribe(self):
+        q = queue.Queue(maxsize=500)
+        with self._lock:
+            # Replay last 200 lines for new subscribers
+            for line in self._buffer[-200:]:
+                try:
+                    q.put_nowait(line)
+                except Exception:
+                    pass
+            self._clients.append(q)
+        return q
+
+    def unsubscribe(self, q):
+        with self._lock:
+            try:
+                self._clients.remove(q)
+            except ValueError:
+                pass
+
+
+log_broadcaster = LogBroadcaster()
+
+
+class _TeeStream:
+    """Wraps an existing stream, forwarding writes to both the original and the broadcaster."""
+
+    def __init__(self, original, stream_name):
+        self._original = original
+        self._stream   = stream_name
+
+    def write(self, text):
+        self._original.write(text)
+        if text.strip():
+            log_broadcaster.write(text, self._stream)
+
+    def flush(self):
+        self._original.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+def _install_tee():
+    """Replace sys.stdout/stderr with tee wrappers once, at module import time."""
+    if not isinstance(sys.stdout, _TeeStream):
+        sys.stdout = _TeeStream(sys.stdout, 'stdout')
+    if not isinstance(sys.stderr, _TeeStream):
+        sys.stderr = _TeeStream(sys.stderr, 'stderr')
+
+
+_install_tee()
+
+
+# ── History store ────────────────────────────────────────────────
+def _history_dir():
+    candidates = [
+        os.environ.get('ADORE_HISTORY_DIR'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'history'),
+    ]
+    for path in candidates:
+        if path:
+            os.makedirs(path, exist_ok=True)
+            return path
+    raise RuntimeError("Cannot determine history directory")
+
+
+def _save_run_history(run_id, result_data, log_text=None):
+    hdir = _history_dir()
+    with open(os.path.join(hdir, f'run_{run_id}.json'), 'w') as f:
+        json.dump(result_data, f, indent=2, default=str)
+    if log_text:
+        with open(os.path.join(hdir, f'run_{run_id}.log'), 'w') as f:
+            f.write(log_text)
+
+
+def _load_history_index():
+    hdir = _history_dir()
+    runs = []
+    for fname in sorted(os.listdir(hdir), reverse=True):
+        if not fname.startswith('run_') or not fname.endswith('.json'):
+            continue
+        path = os.path.join(hdir, fname)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            runs.append({
+                'run_id':         data.get('run_id'),
+                'status':         data.get('status'),
+                'overall_result': data.get('results', {}).get('SUMMARY', {}).get('overall_result'),
+                'config_file':    data.get('config_file'),
+                'completed_at':   data.get('completed_at'),
+            })
+        except Exception:
+            pass
+    return runs
+
+
+# ── App factory ──────────────────────────────────────────────────
 def create_app():
     app = Flask(__name__)
-    
+
     get_model_check_blueprint, _ = setup_imports()
     blueprint = get_model_check_blueprint()
     app.register_blueprint(blueprint)
-    
+
+    @app.after_request
+    def add_cors(response):
+        response.headers['Access-Control-Allow-Origin']  = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response
+
     @app.route('/')
     def index():
         return {
             'message': 'Adore Model Checker API',
-            'version': '0.1.0',
+            'version': '0.2.0',
             'endpoints': {
-                'model_check': '/api/model_check/',
-                'status': '/api/model_check/status',
-                'results': '/api/model_check/results'
+                'blueprint':     '/api/model_check/',
+                'dashboard':     '/api/model_checker/dashboard',
+                'session':       '/api/model_checker/session/start',
+                'history':       '/api/model_checker/history',
+                'configs':       '/api/model_checker/configs',
+                'logs':          '/api/model_checker/logs/stream',
+                'continuous_ext': '/api/model_checker/continuous/',
             }
         }
-    
+
     @app.route('/health')
     def health():
         return {'status': 'healthy'}
-    
+
+    # Dashboard — /api/model_checker/ prefix never collides with the blueprint.
+    @app.route('/api/model_checker/dashboard')
+    def dashboard():
+        return Response(_dashboard_html(), mimetype='text/html')
+
+    # Disabled-proposition store for continuous mode.
+    _continuous_state = {'disabled_propositions': set()}
+
+    @app.route('/api/model_checker/continuous/disabled', methods=['POST'])
+    def set_disabled_propositions():
+        data = request.get_json(silent=True) or {}
+        _continuous_state['disabled_propositions'] = set(data.get('disabled_propositions', []))
+        return jsonify({'ok': True})
+
+    @app.route('/api/model_checker/continuous/violations/filtered')
+    def filtered_violations():
+        disabled = _continuous_state['disabled_propositions']
+        with app.test_client() as c:
+            qs = request.query_string.decode()
+            resp = c.get(f'/api/model_check/continuous/violations?{qs}')
+            if resp.status_code != 200:
+                return resp.data, resp.status_code, {'Content-Type': resp.content_type}
+            body = resp.get_json()
+            if disabled and body and 'violations' in body:
+                body['violations'] = [
+                    v for v in body['violations']
+                    if v.get('proposition') not in disabled
+                ]
+            return jsonify(body)
+
+    # Forward all other /api/model_checker/continuous/* requests to the blueprint.
+    # Registered after the two specific routes above so Flask matches those first.
+    @app.route('/api/model_checker/continuous/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])
+    def proxy_continuous(subpath):
+        with app.test_client() as c:
+            target = f'/api/model_check/continuous/{subpath}'
+            if request.method == 'POST':
+                resp = c.post(target, json=request.get_json(silent=True) or {},
+                              query_string=request.query_string)
+            else:
+                resp = c.get(target, query_string=request.query_string)
+        return Response(resp.data, status=resp.status_code, content_type=resp.content_type)
+
+    # ── Timed session endpoint ────────────────────────────────────
+    @app.route('/api/model_checker/session/start', methods=['POST'])
+    def session_start():
+        data        = request.get_json(silent=True) or {}
+        config_file = data.get('config_file', 'config/default.yaml')
+        mode        = data.get('mode', 'online')
+        duration    = float(data.get('duration', 60))
+        vehicle_id  = int(data.get('vehicle_id', 0))
+        bag_file    = data.get('bag_file')
+        label       = data.get('label', '')
+
+        try:
+            from adore_model_checker.model_checker_api import _get_api
+            api_instance = _get_api()
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+        try:
+            if mode == 'offline':
+                if not bag_file:
+                    return jsonify({'success': False, 'error': 'bag_file required for offline mode'}), 400
+                run_id = api_instance.worker.queue_offline_run(
+                    config_file=config_file,
+                    bag_file=bag_file,
+                    label=label,
+                )
+            else:
+                run_id = api_instance.worker.queue_online_run(
+                    config_file=config_file,
+                    duration=duration,
+                    vehicle_id=vehicle_id,
+                    label=label,
+                )
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+        def _persist_when_done():
+            deadline = time.time() + duration + 120
+            while time.time() < deadline:
+                try:
+                    run = api_instance.cache.get_run(run_id)
+                    if run and run.status.value in ('completed', 'failed', 'cancelled', 'error'):
+                        result_data = {
+                            'run_id':       run_id,
+                            'status':       run.status.value,
+                            'config_file':  config_file,
+                            'completed_at': datetime.utcnow().isoformat(),
+                            'results':      getattr(run, 'results', None),
+                        }
+                        _save_run_history(run_id, result_data)
+                        return
+                except Exception:
+                    pass
+                time.sleep(3)
+
+        threading.Thread(target=_persist_when_done, daemon=True).start()
+
+        return jsonify({'success': True, 'run_id': run_id})
+
+    @app.route('/api/model_checker/session/<int:run_id>/cancel', methods=['POST'])
+    def session_cancel(run_id):
+        try:
+            from adore_model_checker.model_checker_api import _get_api
+            api_instance = _get_api()
+            api_instance.worker.cancel_run(run_id)
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/model_checker/result/<int:run_id>')
+    def result_proxy(run_id):
+        with app.test_client() as c:
+            resp = c.get(f'/api/model_check/result/{run_id}')
+            return resp.data, resp.status_code, {'Content-Type': resp.content_type}
+
+    # ── History endpoints ─────────────────────────────────────────
+    @app.route('/api/model_checker/history')
+    def history_list():
+        try:
+            return jsonify({'runs': _load_history_index()})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/model_checker/history/<int:run_id>/log')
+    def history_log(run_id):
+        hdir = _history_dir()
+        log_path = os.path.join(hdir, f'run_{run_id}.log')
+        if not os.path.exists(log_path):
+            return jsonify({'log': None})
+        with open(log_path) as f:
+            return jsonify({'log': f.read()})
+
+    # ── Config file endpoints ─────────────────────────────────────
+    @app.route('/api/model_checker/configs', methods=['GET'])
+    def configs_list():
+        try:
+            cdir    = _config_dir()
+            configs = []
+            for fname in sorted(os.listdir(cdir)):
+                if not fname.lower().endswith(('.yaml', '.yml')):
+                    continue
+                fpath = os.path.join(cdir, fname)
+                stat  = os.stat(fpath)
+                configs.append({
+                    'name':     fname,
+                    'size':     stat.st_size,
+                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+            return jsonify({'configs': configs})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/model_checker/configs/<path:name>', methods=['GET'])
+    def config_get(name):
+        if not _safe_config_name(name):
+            return jsonify({'error': 'Invalid filename'}), 400
+        path = os.path.join(_config_dir(), name)
+        if not os.path.exists(path):
+            return jsonify({'error': 'Not found'}), 404
+        with open(path) as f:
+            return jsonify({'name': name, 'content': f.read()})
+
+    @app.route('/api/model_checker/configs', methods=['POST'])
+    def config_save():
+        data    = request.get_json(silent=True) or {}
+        name    = data.get('name', '').strip()
+        content = data.get('content', '')
+        if not _safe_config_name(name):
+            return jsonify({'error': 'Invalid filename'}), 400
+        path = os.path.join(_config_dir(), name)
+        with open(path, 'w') as f:
+            f.write(content)
+        return jsonify({'success': True, 'name': name})
+
+    @app.route('/api/model_checker/configs/<path:name>', methods=['DELETE'])
+    def config_delete(name):
+        if not _safe_config_name(name):
+            return jsonify({'error': 'Invalid filename'}), 400
+        path = os.path.join(_config_dir(), name)
+        if not os.path.exists(path):
+            return jsonify({'error': 'Not found'}), 404
+        os.remove(path)
+        return jsonify({'success': True})
+
+    # ── Log stream (SSE) ──────────────────────────────────────────
+    @app.route('/api/model_checker/logs/stream')
+    def logs_stream():
+        def generate():
+            q = log_broadcaster.subscribe()
+            try:
+                yield 'retry: 3000\n\n'
+                while True:
+                    try:
+                        msg = q.get(timeout=20)
+                        yield f'data: {msg}\n\n'
+                    except queue.Empty:
+                        yield ': keepalive\n\n'
+            except GeneratorExit:
+                pass
+            finally:
+                log_broadcaster.unsubscribe(q)
+
+        return Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',
+            },
+        )
+
     return app
+
 
 def main():
     app = create_app()
-    
+
     try:
         print("Starting Adore Model Checker API server...")
-        print("Available at: http://localhost:5000")
+        print("Available at:  http://localhost:5000")
         print("API endpoints: http://localhost:5000/api/model_check/")
+        print("Dashboard:     http://localhost:5000/api/model_checker/dashboard")
         app.run(host='0.0.0.0', port=5000, debug=True)
     except KeyboardInterrupt:
         print("\nShutting down...")
@@ -55,8 +620,9 @@ def main():
         try:
             _, stop_model_check_worker = setup_imports()
             stop_model_check_worker()
-        except:
+        except Exception:
             pass
+
 
 if __name__ == '__main__':
     main()

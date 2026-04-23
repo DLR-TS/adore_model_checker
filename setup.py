@@ -24,21 +24,23 @@ setup(
     author="Your Name",
     author_email="your.email@example.com",
     url="https://github.com/yourusername/adore-model-checker",
-    
+
     packages=find_packages(include=['adore_model_checker', 'adore_model_checker.*']),
     py_modules=['adore_model_checker_cli', 'adore_model_checker_api_app'],
 
     include_package_data=True,
     package_data={
         'adore_model_checker': [
-            'config/*.yaml', 
+            # Dashboard HTML served by the API blueprint
+            'adore_model_checker_dashboard.html',
+            # Config files
+            'config/*.yaml',
             'config/*.yml',
-            '*.yaml', 
-            '*.yml'
+            '*.yaml',
+            '*.yml',
         ],
-        '': ['config/*.yaml', 'config/*.yml'],
     },
-    
+
     install_requires=read_requirements(),
     python_requires='>=3.8',
 
@@ -64,7 +66,7 @@ setup(
         'Topic :: Software Development :: Testing',
         'Topic :: System :: Monitoring',
     ],
-    
+
     keywords='ros2 model-checking safety verification autonomous-vehicles temporal-logic',
 
     project_urls={

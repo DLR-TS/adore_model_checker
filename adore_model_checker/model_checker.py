@@ -40,8 +40,17 @@ def setup_imports():
 
 ROSMarshaller, BagFileReader, ROSMessageImporter = setup_imports()
 
-from pyModelChecking import *
-from pyModelChecking.CTLS import *
+from pyModelChecking.kripke import Kripke
+import pyModelChecking.CTLS as _mc_ctls
+import pyModelChecking.CTL  as _mc_ctl
+import pyModelChecking.LTL  as _mc_ltl
+
+from pyModelChecking.CTLS import (
+    modelcheck,
+    A, E, F, G, X, U, R,
+    Not, And, Or, Bool, Imply,
+    AtomicProposition,
+)
 
 ROSMessageImporter.import_all_messages()
 
@@ -383,6 +392,8 @@ class PropositionConfig:
     enabled: bool = True
     atomic_prop: str = "p"
     formula_type: str = "always"
+    logic_type: str = "ctl"
+    ltl_formula: Optional[str] = None
     threshold: Optional[float] = None
     data_sources: Dict[str, DataSourceConfig] = field(default_factory=dict)
     evaluation_function: Optional[str] = None
@@ -480,6 +491,15 @@ class SafetyParameters:
     construction_zone_speed_reduction: float = 0.7
 
 @dataclass
+class ContinuousMonitoringConfig:
+    enabled: bool = False
+    interval_seconds: float = 30.0
+    window_size: int = 300
+    max_violations: int = 10000
+    log_violations: bool = True
+    violation_log_file: str = "violations.jsonl"
+
+@dataclass
 class MonitoringConfig:
     monitoring_frequency: float = 10.0
     buffer_size: int = 1000
@@ -488,6 +508,7 @@ class MonitoringConfig:
     debug_file: str = "data/monster.yaml"
     safety_params: SafetyParameters = field(default_factory=SafetyParameters)
     vehicles: List[VehicleConfig] = field(default_factory=list)
+    continuous_monitoring: ContinuousMonitoringConfig = field(default_factory=ContinuousMonitoringConfig)
 
 @dataclass
 class VehicleState:
@@ -616,9 +637,17 @@ class ConfigLoader:
                 vehicle_config = ConfigLoader._parse_vehicle_config(vehicle_dict)
                 vehicles.append(vehicle_config)
 
+        continuous_monitoring = ContinuousMonitoringConfig()
+        if 'continuous_monitoring' in config_dict:
+            cm_dict = config_dict['continuous_monitoring']
+            for key, value in cm_dict.items():
+                if hasattr(continuous_monitoring, key):
+                    setattr(continuous_monitoring, key, value)
+
         main_config = MonitoringConfig(
             safety_params=safety_params,
-            vehicles=vehicles
+            vehicles=vehicles,
+            continuous_monitoring=continuous_monitoring,
         )
 
         if 'monitoring' in config_dict:
@@ -649,9 +678,11 @@ class ConfigLoader:
                     for ds_name, ds_config in prop_config['data_sources'].items():
                         data_sources[ds_name] = DataSourceConfig(**ds_config)
                     prop_config.pop('data_sources')
-                
+
+                additional_params = prop_config.pop('additional_params', {})
                 prop_config_obj = PropositionConfig(**prop_config)
                 prop_config_obj.data_sources = data_sources
+                prop_config_obj.additional_params = additional_params
                 propositions[prop_name] = prop_config_obj
 
         return VehicleConfig(
@@ -1860,28 +1891,170 @@ class ModelChecker:
         return scale
 
     def get_formula(self, prop_config: PropositionConfig):
-        atom = prop_config.atomic_prop
-        
-        formula_types = {
-            'always': A(G(atom)),
-            'always_not': A(G(Not(atom))),
-            'eventually': A(F(atom)),
-            'eventually_always': A(E(G(F(atom)))),
-            'never': A(G(Not(atom))),
-            'next': A(X(atom)),
-            'until': lambda atom2: A(U(atom, atom2)),
-            'weak_until': lambda atom2: A(W(atom, atom2)),
-        }
-        
+        """Build a formula object using the logic specified by prop_config.logic_type.
+
+        logic_type values:
+          ctls  – CTL* (default, existing behaviour).  formula_type shortcuts apply.
+          ctl   – CTL proper (AF/AG/EF/EG state-formula forms).
+          ltl   – LTL.  formula_type shortcuts apply; ltl_formula overrides.
+
+        When logic_type is 'ltl' and ltl_formula is set the string is parsed
+        directly.  The placeholder {p} is substituted with atomic_prop.
+        """
+        logic = (prop_config.logic_type or 'ctls').lower().strip()
+        atom  = prop_config.atomic_prop
+
+        if logic == 'ltl':
+            return self._build_ltl_formula(prop_config, atom)
+        elif logic == 'ctl':
+            return self._build_ctl_formula(prop_config, atom)
+        else:
+            return self._build_ctls_formula(prop_config, atom)
+
+    # ------------------------------------------------------------------ CTL*
+    def _build_ctls_formula(self, prop_config: PropositionConfig, atom: str):
         formula_type = prop_config.formula_type
-        if formula_type in formula_types:
-            formula_func = formula_types[formula_type]
-            if callable(formula_func) and formula_type in ['until', 'weak_until']:
-                atom2 = prop_config.additional_params.get('until_atom', 'q')
-                return formula_func(atom2)
-            return formula_func
-        
-        return A(G(atom))
+        mc = _mc_ctls
+        table = {
+            'always':           mc.A(mc.G(atom)),
+            'always_not':       mc.A(mc.G(mc.Not(atom))),
+            'eventually':       mc.A(mc.F(atom)),
+            'eventually_always': mc.A(mc.G(mc.F(atom))),
+            'never':            mc.A(mc.G(mc.Not(atom))),
+            'next':             mc.A(mc.X(atom)),
+        }
+        if formula_type in ('until', 'weak_until'):
+            atom2 = prop_config.additional_params.get('until_atom', 'q')
+            if formula_type == 'until':
+                return mc.A(mc.U(atom, atom2))
+            # weak-until: (p U q) | G(p)
+            return mc.A(mc.Or(mc.U(atom, atom2), mc.G(atom)))
+        return table.get(formula_type, mc.A(mc.G(atom)))
+
+    # ------------------------------------------------------------------ CTL
+    def _build_ctl_formula(self, prop_config: PropositionConfig, atom: str):
+        formula_type = prop_config.formula_type
+        mc = _mc_ctl
+        table = {
+            'always':           mc.AG(atom),
+            'always_not':       mc.AG(mc.Not(atom)),
+            'eventually':       mc.AF(atom),
+            'eventually_always': mc.AG(mc.AF(atom)),
+            'never':            mc.AG(mc.Not(atom)),
+            'next':             mc.AX(atom),
+            'exists_eventually': mc.EF(atom),
+            'exists_always':    mc.EG(atom),
+            'exists_next':      mc.EX(atom),
+        }
+        if formula_type in ('until', 'weak_until'):
+            atom2 = prop_config.additional_params.get('until_atom', 'q')
+            return mc.AU(atom, atom2)
+        return table.get(formula_type, mc.AG(atom))
+
+    # ------------------------------------------------------------------ LTL
+    def _build_ltl_formula(self, prop_config: PropositionConfig, atom: str):
+        mc = _mc_ltl
+        # explicit formula string takes priority
+        if prop_config.ltl_formula:
+            raw = prop_config.ltl_formula.replace('{p}', atom).strip()
+            try:
+                return self._parse_ltl_string(raw, atom, mc)
+            except Exception as e:
+                logging.warning(
+                    f"LTL formula parse failed for '{raw}': {e}. "
+                    f"Falling back to A(G({atom}))."
+                )
+
+        formula_type = prop_config.formula_type
+        table = {
+            'always':           mc.A(mc.G(atom)),
+            'always_not':       mc.A(mc.G(mc.Not(atom))),
+            'eventually':       mc.A(mc.F(atom)),
+            'eventually_always': mc.A(mc.G(mc.F(atom))),
+            'never':            mc.A(mc.G(mc.Not(atom))),
+            'next':             mc.A(mc.X(atom)),
+        }
+        if formula_type in ('until', 'weak_until'):
+            atom2 = prop_config.additional_params.get('until_atom', 'q')
+            # LTL has no W; model weak-until as (p U q) | G(p)
+            if formula_type == 'until':
+                return mc.A(mc.U(atom, atom2))
+            return mc.A(mc.Or(mc.U(atom, atom2), mc.G(atom)))
+        return table.get(formula_type, mc.A(mc.G(atom)))
+
+    def _parse_ltl_string(self, s: str, atom: str, mc):
+        """Recursive descent parser for LTL formula strings.
+
+        Supported grammar (operators bind tightest to loosest):
+          atom  ::= any non-operator token (taken as atomic prop name)
+          unary ::= '!' expr | 'G' expr | 'F' expr | 'X' expr | '(' expr ')'
+          expr  ::= unary ((' U ' | ' R ' | ' W ' | ' &' | ' |') unary)*
+
+        The placeholder {p} must already have been replaced by the caller.
+        """
+        s = s.strip()
+
+        # Strip outer parentheses
+        if s.startswith('(') and s.endswith(')'):
+            inner = s[1:-1].strip()
+            # Only strip if parens are balanced
+            depth = 0
+            for ch in inner:
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                if depth < 0:
+                    break
+            if depth == 0:
+                return self._parse_ltl_string(inner, atom, mc)
+
+        # Binary operators (split on first occurrence at depth 0)
+        for op_str, builder in [
+            (' U ', lambda l, r: mc.A(mc.U(l, r))),
+            (' R ', lambda l, r: mc.A(mc.R(l, r))),
+            (' W ', lambda l, r: mc.A(mc.Or(mc.U(l, r), mc.G(l)))),
+            (' & ', lambda l, r: mc.And(l, r)),
+            (' | ', lambda l, r: mc.Or(l, r)),
+        ]:
+            idx = self._find_binary_op(s, op_str)
+            if idx != -1:
+                left  = self._parse_ltl_string(s[:idx].strip(), atom, mc)
+                right = self._parse_ltl_string(s[idx + len(op_str):].strip(), atom, mc)
+                return builder(left, right)
+
+        # Unary prefixes
+        for prefix, builder in [
+            ('! ', lambda sub: mc.Not(sub)),
+            ('G ', lambda sub: mc.A(mc.G(sub))),
+            ('F ', lambda sub: mc.A(mc.F(sub))),
+            ('X ', lambda sub: mc.A(mc.X(sub))),
+            ('G(', lambda sub: mc.A(mc.G(sub))),
+            ('F(', lambda sub: mc.A(mc.F(sub))),
+            ('X(', lambda sub: mc.A(mc.X(sub))),
+            ('!(', lambda sub: mc.Not(sub)),
+        ]:
+            if s.startswith(prefix):
+                rest = s[len(prefix):]
+                if prefix.endswith('('):
+                    rest = rest.rstrip(')')
+                return builder(self._parse_ltl_string(rest.strip(), atom, mc))
+
+        # Leaf: atomic proposition
+        return s
+
+    def _find_binary_op(self, s: str, op: str) -> int:
+        """Return index of op in s at parenthesis depth 0, or -1."""
+        depth = 0
+        for i in range(len(s) - len(op) + 1):
+            ch = s[i]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            elif depth == 0 and s[i:i + len(op)] == op:
+                return i
+        return -1
 
     def create_kripke_from_states(self, states: List[VehicleState], 
                                   prop_config: PropositionConfig,
@@ -2213,55 +2386,61 @@ class ModelChecker:
             return 'None', 'None'
             # No Output
     
-    def check_model(self, kripke: Kripke, statistics: Dict[str, Any], formula) -> bool:
-        """Check if Kripke structure satisfies the formula from initial state"""
+    def check_model(self, kripke: Kripke, statistics: Dict[str, Any], formula,
+                    logic_type: str = 'ctls') -> bool:
+        """Check if Kripke structure satisfies the formula from initial state.
+
+        Dispatches to the correct modelcheck function based on logic_type:
+          ctls  - pyModelChecking.CTLS.modelcheck  (default)
+          ctl   - pyModelChecking.CTL.modelcheck
+          ltl   - pyModelChecking.LTL.modelcheck
+        """
         try:
             import sys
             original_limit = sys.getrecursionlimit()
             try:
                 sys.setrecursionlimit(5000)
-                
-                logging.info(f"Checking model with formula: {formula}")
+
+                logging.info(f"Checking model [{logic_type}] with formula: {formula}")
                 labeling = kripke.labelling_function()
                 logging.info(f"Kripke structure has {len(labeling)} states")
-                
+
                 for i in range(min(5, len(labeling))):
                     if i in labeling:
                         logging.info(f"  State {i}: {labeling[i]}")
-                
-                result = modelcheck(kripke, formula)
-                
+
+                logic = (logic_type or 'ctls').lower().strip()
+                if logic == 'ltl':
+                    result = _mc_ltl.modelcheck(kripke, formula)
+                elif logic == 'ctl':
+                    result = _mc_ctl.modelcheck(kripke, formula)
+                else:
+                    result = _mc_ctls.modelcheck(kripke, formula)
+
                 initial_state = 0
                 satisfies_formula = initial_state in result
-                
+
                 logging.info(f"Model check result: {sorted(result) if result else 'empty set'}")
                 logging.info(f"Initial state {initial_state} in result: {initial_state in result}")
                 logging.info(f"Formula satisfied: {satisfies_formula}")
-                
-                atom_name = None
 
-                # safety_score check
+                # Safety-score propositions bypass formula result
                 if 'average_safety_score' in statistics and statistics.get('states_with_data', 0) > 0:
-                    if statistics['average_safety_score'] > 0.4:
-                        return True
-                    else:
-                        return False
+                    return statistics['average_safety_score'] > 0.4
 
                 if hasattr(formula, 'formula') and hasattr(formula.formula, 'formula'):
                     atom = formula.formula.formula
-                    atom_name = str(atom)
-                    atom_satisfying_states = []
-                    not_atom_satisfying_states = []
+                    atom_sat, not_sat = [], []
                     for state, labels in labeling.items():
                         if atom in labels:
-                            atom_satisfying_states.append(state)
+                            atom_sat.append(state)
                         elif f"not {atom}" in [str(label) for label in labels]:
-                            not_atom_satisfying_states.append(state)
-                    logging.info(f"States satisfying '{atom}': {atom_satisfying_states[:10]}...")
-                    logging.info(f"States satisfying 'not {atom}': {not_atom_satisfying_states[:10]}...")
-                
+                            not_sat.append(state)
+                    logging.info(f"States satisfying '{atom}': {atom_sat[:10]}...")
+                    logging.info(f"States satisfying 'not {atom}': {not_sat[:10]}...")
+
                 return satisfies_formula
-                
+
             finally:
                 sys.setrecursionlimit(original_limit)
         except Exception as e:
@@ -2415,7 +2594,10 @@ class VehicleMonitorAnalyzer:
                     self._print_progress(f"Checking model for {prop_name}")
                     logging.info(f"Kripke structure created for {prop_name}, checking model")
                     formula = self.model_checker.get_formula(prop_config)
-                    result = self.model_checker.check_model(kripke, statistics, formula)
+                    result = self.model_checker.check_model(
+                        kripke, statistics, formula,
+                        logic_type=prop_config.logic_type or 'ctls',
+                    )
                     results[prop_name] = {
                         'result': result,
                         'status': 'PASS' if result else 'FAIL',
@@ -2426,6 +2608,7 @@ class VehicleMonitorAnalyzer:
                         'description': description_info,
                         'formula_description': formula_description,
                         'formula_type': prop_config.formula_type,
+                        'logic_type': prop_config.logic_type or 'ctls',
                         'threshold': prop_config.threshold,
                         'group': prop_type.group.value
                     }
@@ -2560,3 +2743,230 @@ class VehicleMonitorAnalyzer:
                 results[f'vehicle_{vehicle_config.id}'] = {'error': str(e)}
         
         return results
+
+
+@dataclass
+class Violation:
+    violation_id: str
+    timestamp: float
+    vehicle_id: int
+    proposition: str
+    group: str
+    formula_type: str
+    logic_type: str
+    description: str
+    statistics: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'violation_id': self.violation_id,
+            'timestamp': self.timestamp,
+            'timestamp_iso': datetime.fromtimestamp(self.timestamp).isoformat(),
+            'vehicle_id': self.vehicle_id,
+            'proposition': self.proposition,
+            'group': self.group,
+            'formula_type': self.formula_type,
+            'logic_type': self.logic_type,
+            'description': self.description,
+            'statistics': self.statistics,
+        }
+
+
+class ContinuousMonitorEngine:
+    """
+    Runs periodic model-checking windows against live ROS data.
+    Violations are stored in-memory and optionally written to a JSONL log file.
+    """
+
+    def __init__(self, config: MonitoringConfig):
+        self.config = config
+        self.cm_config = config.continuous_monitoring
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.RLock()
+
+        self._violations: List[Violation] = []
+        self._stats: Dict[str, Any] = {
+            'windows_checked': 0,
+            'total_violations': 0,
+            'violations_by_proposition': defaultdict(int),
+            'violations_by_group': defaultdict(int),
+            'start_time': None,
+            'last_check_time': None,
+        }
+
+        self._online_monitors: Dict[int, OnlineMonitor] = {}
+        self._analyzers: Dict[int, VehicleMonitorAnalyzer] = {}
+
+        if self.cm_config.log_violations:
+            log_dir = os.path.dirname(self.cm_config.violation_log_file) or '.'
+            os.makedirs(log_dir, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Public control API
+    # ------------------------------------------------------------------
+
+    def start(self) -> bool:
+        with self._lock:
+            if self._running:
+                return False
+            self._running = True
+            self._stats['start_time'] = time.time()
+
+            for vehicle_config in self.config.vehicles:
+                monitor = OnlineMonitor(self.config, vehicle_config)
+                analyzer = VehicleMonitorAnalyzer(self.config)
+                self._online_monitors[vehicle_config.id] = monitor
+                self._analyzers[vehicle_config.id] = analyzer
+
+            self._thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._thread.start()
+            logging.info("ContinuousMonitorEngine started")
+            return True
+
+    def stop(self) -> bool:
+        with self._lock:
+            if not self._running:
+                return False
+            self._running = False
+
+        if self._thread:
+            self._thread.join(timeout=self.cm_config.interval_seconds + 5)
+
+        for monitor in self._online_monitors.values():
+            monitor.stop()
+        self._online_monitors.clear()
+        self._analyzers.clear()
+        logging.info("ContinuousMonitorEngine stopped")
+        return True
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._running
+
+    def get_statistics(self) -> Dict[str, Any]:
+        with self._lock:
+            stats = dict(self._stats)
+            stats['violations_by_proposition'] = dict(self._stats['violations_by_proposition'])
+            stats['violations_by_group'] = dict(self._stats['violations_by_group'])
+            stats['is_running'] = self._running
+            if stats['start_time']:
+                stats['uptime_seconds'] = time.time() - stats['start_time']
+            return stats
+
+    def get_violations(self, limit: Optional[int] = None,
+                       proposition: Optional[str] = None,
+                       vehicle_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            results = list(self._violations)
+
+        if proposition:
+            results = [v for v in results if v.proposition == proposition]
+        if vehicle_id is not None:
+            results = [v for v in results if v.vehicle_id == vehicle_id]
+
+        results.sort(key=lambda v: v.timestamp, reverse=True)
+        if limit:
+            results = results[:limit]
+        return [v.to_dict() for v in results]
+
+    def get_violation(self, violation_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            for v in self._violations:
+                if v.violation_id == violation_id:
+                    return v.to_dict()
+        return None
+
+    # ------------------------------------------------------------------
+    # Internal loop
+    # ------------------------------------------------------------------
+
+    def _run_loop(self):
+        while True:
+            with self._lock:
+                if not self._running:
+                    break
+
+            try:
+                self._check_window()
+            except Exception as e:
+                logging.error(f"ContinuousMonitorEngine check error: {e}")
+
+            deadline = time.time() + self.cm_config.interval_seconds
+            while time.time() < deadline:
+                with self._lock:
+                    if not self._running:
+                        return
+                time.sleep(0.5)
+
+    def _check_window(self):
+        import copy
+
+        for vehicle_config in self.config.vehicles:
+            monitor = self._online_monitors.get(vehicle_config.id)
+            analyzer = self._analyzers.get(vehicle_config.id)
+            if not monitor or not analyzer:
+                continue
+
+            window_size = self.cm_config.window_size
+            states: List[VehicleState] = []
+
+            tmp: List[VehicleState] = []
+            while not monitor.data_buffer.empty() and len(tmp) < window_size:
+                tmp.append(monitor.data_buffer.get_nowait())
+
+            for s in tmp[-window_size:]:
+                states.append(s)
+
+            if not states:
+                continue
+
+            results = analyzer._analyze_states(states, vehicle_config)
+
+            with self._lock:
+                self._stats['windows_checked'] += 1
+                self._stats['last_check_time'] = time.time()
+
+                for prop_name, prop_result in results.items():
+                    if prop_name == 'SUMMARY':
+                        continue
+                    if prop_result.get('result') is False:
+                        self._record_violation(prop_name, prop_result, vehicle_config.id)
+
+    def _record_violation(self, prop_name: str, prop_result: Dict[str, Any], vehicle_id: int):
+        import uuid
+        violation = Violation(
+            violation_id=str(uuid.uuid4()),
+            timestamp=time.time(),
+            vehicle_id=vehicle_id,
+            proposition=prop_name,
+            group=prop_result.get('group', 'unknown'),
+            formula_type=prop_result.get('formula_type', 'unknown'),
+            logic_type=prop_result.get('logic_type', 'ctl'),
+            description=prop_result.get('description', {}).get('description', ''),
+            statistics=prop_result.get('statistics', {}),
+        )
+
+        if len(self._violations) < self.cm_config.max_violations:
+            self._violations.append(violation)
+
+        self._stats['total_violations'] += 1
+        self._stats['violations_by_proposition'][prop_name] += 1
+        self._stats['violations_by_group'][violation.group] += 1
+
+        logging.warning(
+            f"[VIOLATION] vehicle={vehicle_id} prop={prop_name} "
+            f"group={violation.group} id={violation.violation_id}"
+        )
+
+        if self.cm_config.log_violations:
+            try:
+                with open(self.cm_config.violation_log_file, 'a') as fh:
+                    import json as _json
+                    fh.write(_json.dumps(violation.to_dict()) + '\n')
+            except Exception as e:
+                logging.error(f"Failed to write violation log: {e}")
+
+
+# Bring datetime into scope for Violation.to_dict (used inside model_checker module)
+from datetime import datetime

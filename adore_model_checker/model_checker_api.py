@@ -9,7 +9,7 @@ import re
 import json
 import queue
 from datetime import datetime, timezone
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, jsonify, request, send_file, Response
 from werkzeug.utils import secure_filename
 import tempfile
 import subprocess
@@ -44,33 +44,22 @@ except ImportError:
 from pathlib import Path
 import shutil
 
-from .model_checker import VehicleMonitorAnalyzer, ConfigLoader, MonitoringConfig
+from .model_checker import VehicleMonitorAnalyzer, ConfigLoader, MonitoringConfig, ContinuousMonitorEngine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 __all__ = [
     'ModelCheckAPI',
-    'ModelCheckCache', 
+    'ModelCheckCache',
     'ModelCheckWorker',
     'get_model_check_blueprint',
     'stop_model_check_worker',
     'model_check_api',
-    'model_check_blueprint'
+    'model_check_blueprint',
+    'ContinuousMonitorEngine',
 ]
 
-
-def sanitize_infinity(obj):
-    """Recursively replace infinity and NaN values with None for JSON serialization"""
-    if isinstance(obj, dict):
-        return {k: sanitize_infinity(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [sanitize_infinity(item) for item in obj]
-    elif isinstance(obj, float):
-        if math.isinf(obj) or math.isnan(obj):
-            return None
-        return obj
-    return obj
 
 class ConfigResolver:
     """Resolves config file paths based on installation context"""
@@ -900,7 +889,9 @@ class ModelCheckAPI:
         self.cache = ModelCheckCache(self.log_directory)
         self.worker = ModelCheckWorker(self.cache)
         self.default_config = default_config
-        
+        self._continuous_engine: Optional[ContinuousMonitorEngine] = None
+        self._continuous_lock = threading.RLock()
+
         try:
             self.config_directory = ConfigResolver.get_config_directory()
         except Exception as e:
@@ -909,10 +900,10 @@ class ModelCheckAPI:
             os.makedirs(fallback_dir, exist_ok=True)
             self.config_directory = fallback_dir
             logger.warning(f"Using fallback config directory: {self.config_directory}")
-        
+
         self.blueprint = self._create_blueprint()
         self.worker.start()
-        
+
         logger.info(f"ModelCheck API initialized")
         logger.info(f"Config directory: {self.config_directory}")
         logger.info(f"Log directory: {self.log_directory}")
@@ -1242,16 +1233,177 @@ class ModelCheckAPI:
                 status=RunStatus.CANCELLED,
                 end_time=datetime.now(timezone.utc).isoformat()
             )
-            
+
             return jsonify({'message': f'Run {run_id} cancelled'})
-        
+
+        @bp.route('/dashboard', methods=['GET', 'OPTIONS'])
+        def dashboard():
+            if request.method == 'OPTIONS':
+                return Response('', status=204)
+            html = self._load_dashboard_html()
+            return Response(html, mimetype='text/html')
+
+        self._create_continuous_routes(bp)
+
         return bp
-    
+
+    def _load_dashboard_html(self) -> str:
+        """Locate and return the dashboard HTML file content.
+
+        Resolution order:
+        1. importlib.resources — works correctly for both editable and
+           wheel-installed packages, including zip-safe scenarios.
+        2. Filesystem paths relative to __file__ — development fallback.
+        3. Current working directory — last resort.
+        """
+        html = self._load_dashboard_via_resources()
+        if html is not None:
+            return html
+
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'adore_model_checker_dashboard.html'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'adore_model_checker_dashboard.html'),
+            os.path.join(os.getcwd(), 'adore_model_checker_dashboard.html'),
+        ]
+        for path in candidates:
+            abs_path = os.path.normpath(path)
+            if os.path.exists(abs_path):
+                with open(abs_path, 'r') as fh:
+                    return fh.read()
+
+        return (
+            '<!DOCTYPE html><html><body>'
+            '<h2>Dashboard not found</h2>'
+            '<p>adore_model_checker_dashboard.html could not be located.</p>'
+            '</body></html>'
+        )
+
+    def _load_dashboard_via_resources(self):
+        """Return dashboard HTML using importlib.resources, or None on failure."""
+        try:
+            from importlib.resources import files
+            data = files('adore_model_checker').joinpath('adore_model_checker_dashboard.html')
+            if data.is_file():
+                return data.read_text(encoding='utf-8')
+        except Exception:
+            pass
+        try:
+            import importlib.resources as pkg_resources
+            with pkg_resources.open_text('adore_model_checker', 'adore_model_checker_dashboard.html') as fh:
+                return fh.read()
+        except Exception:
+            pass
+        return None
+
+    def _create_continuous_routes(self, bp):
+        """Attach /continuous/* routes onto an existing blueprint."""
+
+        @bp.route('/continuous/start', methods=['POST'])
+        def continuous_start():
+            with self._continuous_lock:
+                if self._continuous_engine and self._continuous_engine.is_running():
+                    return jsonify({'error': 'Continuous monitoring already running'}), 409
+
+                data = request.get_json() or {}
+                config_file = data.get('config_file', self.default_config)
+
+                try:
+                    resolved = ConfigResolver.resolve_config_path(config_file)
+                    config = ConfigLoader.load_config(resolved)
+                except Exception as e:
+                    return jsonify({'error': f'Config error: {e}'}), 400
+
+                cm = config.continuous_monitoring
+                if 'interval_seconds' in data:
+                    cm.interval_seconds = float(data['interval_seconds'])
+                if 'window_size' in data:
+                    cm.window_size = int(data['window_size'])
+                if 'violation_log_file' in data:
+                    cm.violation_log_file = data['violation_log_file']
+                cm.enabled = True
+
+                self._continuous_engine = ContinuousMonitorEngine(config)
+                self._continuous_engine.start()
+
+                logger.info(f"Continuous monitoring started with config: {resolved}")
+                return jsonify({
+                    'message': 'Continuous monitoring started',
+                    'config_file': config_file,
+                    'interval_seconds': cm.interval_seconds,
+                    'window_size': cm.window_size,
+                    'violation_log_file': cm.violation_log_file,
+                })
+
+        @bp.route('/continuous/stop', methods=['POST'])
+        def continuous_stop():
+            with self._continuous_lock:
+                if not self._continuous_engine or not self._continuous_engine.is_running():
+                    return jsonify({'error': 'Continuous monitoring is not running'}), 409
+
+                stopped = self._continuous_engine.stop()
+                return jsonify({'message': 'Continuous monitoring stopped', 'stopped': stopped})
+
+        @bp.route('/continuous/status', methods=['GET'])
+        def continuous_status():
+            with self._continuous_lock:
+                if not self._continuous_engine:
+                    return jsonify({'running': False, 'engine_initialized': False})
+
+                stats = self._continuous_engine.get_statistics()
+                return jsonify({
+                    'running': self._continuous_engine.is_running(),
+                    'engine_initialized': True,
+                    'stats': stats,
+                })
+
+        @bp.route('/continuous/stats', methods=['GET'])
+        def continuous_stats():
+            with self._continuous_lock:
+                if not self._continuous_engine:
+                    return jsonify({'error': 'Continuous monitoring not initialized'}), 404
+
+                return jsonify(sanitize_infinity(self._continuous_engine.get_statistics()))
+
+        @bp.route('/continuous/violations', methods=['GET'])
+        def continuous_violations():
+            with self._continuous_lock:
+                if not self._continuous_engine:
+                    return jsonify({'error': 'Continuous monitoring not initialized'}), 404
+
+            limit = request.args.get('limit', type=int)
+            proposition = request.args.get('proposition')
+            vehicle_id = request.args.get('vehicle_id', type=int)
+
+            violations = self._continuous_engine.get_violations(
+                limit=limit,
+                proposition=proposition,
+                vehicle_id=vehicle_id,
+            )
+            return jsonify(sanitize_infinity({
+                'violations': violations,
+                'count': len(violations),
+            }))
+
+        @bp.route('/continuous/violations/<violation_id>', methods=['GET'])
+        def continuous_violation_detail(violation_id):
+            with self._continuous_lock:
+                if not self._continuous_engine:
+                    return jsonify({'error': 'Continuous monitoring not initialized'}), 404
+
+            violation = self._continuous_engine.get_violation(violation_id)
+            if violation is None:
+                return jsonify({'error': f'Violation {violation_id} not found'}), 404
+
+            return jsonify(sanitize_infinity(violation))
+
     def get_blueprint(self):
         return self.blueprint
-    
+
     def stop_worker(self):
         self.worker.stop()
+        with self._continuous_lock:
+            if self._continuous_engine and self._continuous_engine.is_running():
+                self._continuous_engine.stop()
 
 _model_check_api = None
 _model_check_blueprint = None
