@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim AS adore_model_checker_builder
+FROM debian:bookworm-slim AS adore_model_checker_builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
